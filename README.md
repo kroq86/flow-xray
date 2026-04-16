@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="flow-xray" width="100%">
+  <img src="https://raw.githubusercontent.com/kroq86/flow-xray/main/assets/banner.png" alt="flow-xray" width="100%">
 </p>
 
 <p align="center">
@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/flow-xray/"><img src="https://img.shields.io/pypi/v/flow-xray?color=blue" alt="PyPI"></a>
+  <a href="https://pypi.org/project/flow-xray/"><img src="https://img.shields.io/pypi/v/flow-xray?color=blue&cacheSeconds=60" alt="PyPI"></a>
   <a href="https://github.com/kroq86/flow-xray/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python">
 </p>
@@ -32,7 +32,7 @@ result.to_html("trace.html")
 ```
 
 <p align="center">
-  <img src="assets/demo.png" alt="flow-xray trace viewer" width="100%">
+  <img src="https://raw.githubusercontent.com/kroq86/flow-xray/main/assets/demo.png" alt="flow-xray trace viewer" width="100%">
 </p>
 
 Open `trace.html` — you get a **DAG** of every traced step with inputs, outputs, latency, tokens, cost, and errors. Click a node to inspect. No server, no account, no log viewer — one local file.
