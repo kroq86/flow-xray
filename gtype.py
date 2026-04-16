@@ -1,3 +1,10 @@
+"""
+Standalone list experiment (not the graph debugger).
+
+For the graph-first autodiff / DOT tooling, use the ``flow_xray`` package
+(``from flow_xray import Value, …``).
+"""
+
 import random
 
 
@@ -39,9 +46,7 @@ class Gtype:
       return self.el
 
   def delEl(self):
-    # print(self.__dict__)
-    del (self.__dict__[self.key])  #???
-    # print(self.__dict__)
+    del (self.__dict__[self.key])
     self.array.remove(self.el)
     self.setAttr(self.array)
 

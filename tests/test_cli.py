@@ -1,0 +1,72 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+ENV = {**os.environ, "PYTHONPATH": str(ROOT)}
+
+
+def test_cli_dot_demo_forward_runs() -> None:
+    r = subprocess.run(
+        [sys.executable, "-m", "flow_xray.cli", "dot", "demo", "forward"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        check=True,
+        env=ENV,
+    )
+    assert "digraph G" in r.stdout
+    assert "v0" in r.stdout
+
+
+def test_cli_dot_demo_html(tmp_path: Path) -> None:
+    out = tmp_path / "x.html"
+    subprocess.run(
+        [sys.executable, "-m", "flow_xray.cli", "dot", "demo", "forward", "--html", str(out)],
+        cwd=str(ROOT),
+        check=True,
+        env=ENV,
+    )
+    t = out.read_text(encoding="utf-8")
+    assert "digraph G" in t and "fetch(" not in t
+
+
+def test_cli_dot_export_example(tmp_path: Path) -> None:
+    script = tmp_path / "g.py"
+    script.write_text(
+        "from flow_xray import Value\n"
+        "a = Value(1.0)\n"
+        "root = a * a\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "o.dot"
+    subprocess.run(
+        [sys.executable, "-m", "flow_xray.cli", "dot", "export", str(script), "-o", str(out)],
+        cwd=str(ROOT),
+        check=True,
+        env=ENV,
+    )
+    t = out.read_text(encoding="utf-8")
+    assert "digraph G" in t
+
+
+def test_cli_run_trace(tmp_path: Path) -> None:
+    script = tmp_path / "s.py"
+    script.write_text(
+        "from flow_xray import trace\n"
+        "@trace\n"
+        "def step():\n"
+        "    return 1\n"
+        "step()\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "t.html"
+    subprocess.run(
+        [sys.executable, "-m", "flow_xray.cli", "run", str(script), "--html", str(out)],
+        cwd=str(ROOT),
+        check=True,
+        env=ENV,
+    )
+    t = out.read_text(encoding="utf-8")
+    assert "flow-xray trace" in t or "step" in t

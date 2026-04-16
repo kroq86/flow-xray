@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flow-xray"
+version = "0.2.0"
+description = "Execution graph debugger — see what your agent / pipeline actually does."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "KirillOstapenko", email = "djkroq@gmail.com" }]
+keywords = ["debugger", "tracing", "agent", "DAG", "execution-graph", "LLM", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Debuggers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/kroq86/flow-xray"
+Repository = "https://github.com/kroq86/flow-xray"
+Issues = "https://github.com/kroq86/flow-xray/issues"
+
+[project.scripts]
+flow-xray = "flow_xray.cli:main"
+flow-xray-viewer = "flow_xray.viewer:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["flow_xray"]
+artifacts = ["flow_xray/static/*"]
+
+[tool.hatch.build.targets.sdist]
+include = ["flow_xray/**", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# secrets
+.env
+
+# generated artifacts (re-create with flow-xray run / python graph_debug.py)
+*.png
+!assets/*.png
+agent_trace.html
+forward.html
+backward.html

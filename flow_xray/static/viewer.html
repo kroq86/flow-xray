@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>flow-xray graph viewer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    #host { overflow: auto; border: 1px solid #ccc; padding: 0.5rem; min-height: 200px; }
+    #fallback { white-space: pre-wrap; font-size: 12px; display: none; }
+    .err { color: #b00; }
+  </style>
+</head>
+<body>
+  <h1>flow-xray graph</h1>
+  <p id="status">Loading DOT…</p>
+  <div id="host"></div>
+  <pre id="fallback"></pre>
+  <script type="module">
+    const status = document.getElementById("status");
+    const host = document.getElementById("host");
+    const fallback = document.getElementById("fallback");
+    async function run() {
+      let dot;
+      try {
+        const r = await fetch("/graph.dot");
+        dot = await r.text();
+      } catch (e) {
+        status.textContent = "Could not load /graph.dot";
+        status.className = "err";
+        return;
+      }
+      try {
+        const { Graphviz } = await import(
+          "https://cdn.jsdelivr.net/npm/@hpcc-js/wasm-graphviz@1.6.1/+esm"
+        );
+        const gv = await Graphviz.load();
+        const svg = gv.dot(dot);
+        host.innerHTML = svg;
+        status.textContent = "Rendered (WASM Graphviz).";
+      } catch (e) {
+        status.innerHTML =
+          "<span class='err'>WASM render failed (offline or blocked CDN).</span> DOT below.";
+        console.error(e);
+        fallback.style.display = "block";
+        fallback.textContent = dot;
+      }
+    }
+    run();
+  </script>
+</body>
+</html>
