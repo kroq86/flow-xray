@@ -70,6 +70,28 @@ flow-xray run my_agent.py --html trace.html
 
 The script must use `@trace` on the functions you want captured. The CLI provides the session; just call your functions normally.
 
+### Async support
+
+`@trace` works with `async def` out of the box — no extra config:
+
+```python
+from flow_xray import trace
+import asyncio
+
+@trace
+async def call_api(query):
+    await asyncio.sleep(0.1)  # simulate async I/O
+    return {"answer": query}
+
+@trace
+async def agent(query):
+    result = await call_api(query)
+    return result["answer"]
+
+result = trace.run(lambda: asyncio.run(agent("hello")))
+result.to_html("async_trace.html")
+```
+
 ### Token / cost tracking
 
 Token usage and estimated cost are auto-extracted from OpenAI response objects, or you can set them manually:
@@ -100,9 +122,16 @@ But when your agent pipeline branches, retries, or chains 6 tools — you don't 
 
 flow-xray is **not** an agent framework. It's the layer **below** them — like Chrome DevTools is to browsers.
 
+## Compatibility
+
+- **Python** 3.10, 3.11, 3.12, 3.13, 3.14 — tested
+- **Sync and async** functions — both supported
+- **Any Python code** — not limited to LLM calls; works with any function you decorate
+- **Frameworks** — works alongside LangGraph, CrewAI, OpenAI SDK, or plain Python
+
 ## How it works
 
-`@trace` wraps functions. When called inside a `trace.run()` session (or `flow-xray run` CLI), it records:
+`@trace` wraps functions (sync and async). When called inside a `trace.run()` session (or `flow-xray run` CLI), it records:
 - function name
 - bound arguments
 - return value or exception
