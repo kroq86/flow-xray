@@ -43,6 +43,34 @@ Open `trace.html` — you get a **DAG** of every traced step with inputs, output
 pip install flow-xray
 ```
 
+## 30-second quickstart
+
+Create `demo_trace.py`:
+
+```python
+from flow_xray import trace
+
+@trace
+def fetch_profile(user_id):
+    return {"id": user_id, "plan": "pro"}
+
+@trace
+def answer_question(user_id):
+    profile = fetch_profile(user_id)
+    return f"user {profile['id']} is on {profile['plan']}"
+
+result = trace.run(answer_question, 42)
+result.to_html("demo_trace.html")
+```
+
+Run it:
+
+```bash
+python demo_trace.py
+```
+
+Open `demo_trace.html` in your browser. You should see one root node (`answer_question`) and one child node (`fetch_profile`).
+
 ## Usage
 
 ### Decorator + `trace.run`
@@ -68,7 +96,7 @@ result.to_html("pipeline.html")
 flow-xray run my_agent.py --html trace.html
 ```
 
-The script must use `@trace` on the functions you want captured. The CLI provides the session; just call your functions normally.
+The script must use `@trace` on the functions you want captured. The CLI provides the session and executes the file without entering `if __name__ == "__main__"` blocks, so put a traced demo call at module scope if you want `flow-xray run` to capture it directly.
 
 ### Async support
 
@@ -105,6 +133,10 @@ def call_llm(prompt):
                completion_tokens=resp.usage.completion_tokens)
     return resp.choices[0].message.content
 ```
+
+### Safety note
+
+`flow-xray` serializes function inputs, outputs, errors, and attached metadata into the generated HTML file. Treat trace files as local debugging artifacts: avoid tracing secrets or redact sensitive payloads before sharing the HTML with others.
 
 ### What you see
 

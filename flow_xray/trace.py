@@ -27,9 +27,10 @@ from __future__ import annotations
 import functools
 import inspect
 import json
-import threading
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any, Callable
 
 
@@ -68,6 +69,7 @@ class TraceNode:
     latency_ms: float = 0.0
     children: list[TraceNode] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
+    _stack_token: object | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -103,8 +105,12 @@ def _extract_llm_meta(output: Any) -> dict[str, Any]:
     usage = getattr(output, "usage", None)
     if usage is None:
         return meta
-    prompt_tok = getattr(usage, "prompt_tokens", None) or getattr(usage, "input_tokens", None)
-    completion_tok = getattr(usage, "completion_tokens", None) or getattr(usage, "output_tokens", None)
+    prompt_tok = getattr(usage, "prompt_tokens", None)
+    if prompt_tok is None:
+        prompt_tok = getattr(usage, "input_tokens", None)
+    completion_tok = getattr(usage, "completion_tokens", None)
+    if completion_tok is None:
+        completion_tok = getattr(usage, "output_tokens", None)
     total_tok = getattr(usage, "total_tokens", None)
     if prompt_tok is not None:
         meta["prompt_tokens"] = prompt_tok
@@ -152,11 +158,17 @@ def _count_all(roots: list[TraceNode]) -> tuple[int, int]:
 class TraceResult:
     """Holds a captured DAG and provides export helpers."""
 
-    __slots__ = ("roots", "return_value")
+    __slots__ = ("roots", "return_value", "error")
 
-    def __init__(self, roots: list[TraceNode], return_value: Any = None) -> None:
+    def __init__(
+        self,
+        roots: list[TraceNode],
+        return_value: Any = None,
+        error: BaseException | None = None,
+    ) -> None:
         self.roots = roots
         self.return_value = return_value
+        self.error = error
 
     def to_dict(self) -> dict[str, Any]:
         return {"nodes": [r.to_dict() for r in self.roots]}
@@ -207,36 +219,37 @@ def _flatten(roots: list[dict], parent_id: str | None = None) -> list[tuple[dict
 
 
 # ---------------------------------------------------------------------------
-# Session (thread-local call-stack tracker)
+# Session (task-local call-stack tracker with shared roots per trace session)
 # ---------------------------------------------------------------------------
 
 class _TraceSession:
-    _local = threading.local()
+    _current_session: ContextVar[_TraceSession | None] = ContextVar("flow_xray_current_session", default=None)
+    _current_stack: ContextVar[tuple[TraceNode, ...]] = ContextVar("flow_xray_current_stack", default=())
     _id_counter = 0
-    _lock = threading.Lock()
+    _id_lock = Lock()
 
     def __init__(self) -> None:
         self.roots: list[TraceNode] = []
-        self._stack: list[TraceNode] = []
 
     @classmethod
     def _next_id(cls) -> str:
-        with cls._lock:
+        with cls._id_lock:
             cls._id_counter += 1
             return f"t{cls._id_counter}"
 
     def enter_node(self, name: str, inputs: dict) -> TraceNode:
+        stack = self._current_stack.get()
         node = TraceNode(
             name=name,
             node_id=self._next_id(),
             inputs=inputs,
             start_ms=time.perf_counter() * 1000,
         )
-        if self._stack:
-            self._stack[-1].children.append(node)
+        if stack:
+            stack[-1].children.append(node)
         else:
             self.roots.append(node)
-        self._stack.append(node)
+        node._stack_token = self._current_stack.set(stack + (node,))
         return node
 
     def exit_node(self, node: TraceNode, output: Any, error: str | None) -> None:
@@ -245,20 +258,22 @@ class _TraceSession:
         node.latency_ms = time.perf_counter() * 1000 - node.start_ms
         if output is not None and not error:
             node.meta.update(_extract_llm_meta(output))
-        if self._stack and self._stack[-1] is node:
-            self._stack.pop()
+        if node._stack_token is not None:
+            self._current_stack.reset(node._stack_token)
+            node._stack_token = None
 
     @classmethod
     def current(cls) -> _TraceSession | None:
-        return getattr(cls._local, "session", None)
+        return cls._current_session.get()
 
     def __enter__(self) -> _TraceSession:
-        self._prev: _TraceSession | None = getattr(_TraceSession._local, "session", None)
-        _TraceSession._local.session = self
+        self._session_token = self._current_session.set(self)
+        self._stack_token = self._current_stack.set(())
         return self
 
     def __exit__(self, *exc: object) -> bool:
-        _TraceSession._local.session = self._prev  # type: ignore[attr-defined]
+        self._current_stack.reset(self._stack_token)
+        self._current_session.reset(self._session_token)
         return False
 
 
@@ -311,16 +326,25 @@ class _Trace:
             wrapper._traced = True  # type: ignore[attr-defined]
             return wrapper
 
-    def run(self, fn: Callable, *args: Any, **kwargs: Any) -> TraceResult:
+    def run(
+        self,
+        fn: Callable,
+        *args: Any,
+        raise_exceptions: bool = False,
+        **kwargs: Any,
+    ) -> TraceResult:
         """Execute *fn* inside a fresh trace session, return ``TraceResult``."""
         session = _TraceSession()
         rv: Any = None
+        err: BaseException | None = None
         with session:
             try:
                 rv = fn(*args, **kwargs)
-            except Exception:
-                pass
-        return TraceResult(session.roots, return_value=rv)
+            except Exception as exc:
+                err = exc
+        if err is not None and raise_exceptions:
+            raise err
+        return TraceResult(session.roots, return_value=rv, error=err)
 
     def capture(self) -> _TraceSession:
         """Return a context-manager session for manual use."""
@@ -344,9 +368,10 @@ class _Trace:
         present, ``estimated_cost_usd`` is computed automatically.
         """
         session = _TraceSession.current()
-        if session is None or not session._stack:
+        stack = _TraceSession._current_stack.get()
+        if session is None or not stack:
             return
-        m = session._stack[-1].meta
+        m = stack[-1].meta
         m.update(kwargs)
         _maybe_add_cost(m)
 

@@ -1,4 +1,5 @@
 import json
+import asyncio
 
 from flow_xray import TraceResult, trace
 
@@ -124,6 +125,68 @@ def test_trace_run_exception_still_captures() -> None:
     assert result.roots[0].error is not None
 
 
+def test_trace_run_exposes_exception_object() -> None:
+    @trace
+    def crash() -> None:
+        raise RuntimeError("oops")
+
+    result = trace.run(crash)
+    assert isinstance(result.error, RuntimeError)
+    assert str(result.error) == "oops"
+
+
+def test_trace_run_can_reraise_exceptions() -> None:
+    @trace
+    def crash() -> None:
+        raise RuntimeError("oops")
+
+    try:
+        trace.run(crash, raise_exceptions=True)
+    except RuntimeError as exc:
+        assert str(exc) == "oops"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_trace_async_nested_calls() -> None:
+    @trace
+    async def child(x: int) -> int:
+        await asyncio.sleep(0)
+        return x + 1
+
+    @trace
+    async def parent(x: int) -> int:
+        return await child(x)
+
+    result = trace.run(lambda: asyncio.run(parent(4)))
+    root = result.roots[0]
+    assert root.name.endswith("<locals>.parent")
+    assert len(root.children) == 1
+    assert root.children[0].name.endswith("<locals>.child")
+    assert root.children[0].output == 5
+
+
+def test_trace_async_gather_keeps_sibling_structure() -> None:
+    @trace
+    async def child(label: str, delay: float) -> str:
+        await asyncio.sleep(delay)
+        return label
+
+    @trace
+    async def parent() -> list[str]:
+        return await asyncio.gather(
+            child("a", 0.01),
+            child("b", 0.0),
+        )
+
+    result = trace.run(lambda: asyncio.run(parent()))
+    root = result.roots[0]
+    assert len(root.children) == 2
+    assert all(child.name.endswith("<locals>.child") for child in root.children)
+    assert [child.output for child in root.children] == ["a", "b"]
+    assert all(not child.children for child in root.children)
+
+
 # ---------------------------------------------------------------------------
 # Token / cost meta
 # ---------------------------------------------------------------------------
@@ -219,3 +282,28 @@ def test_trace_meta_manual_computes_cost() -> None:
     result = trace.run(step)
     meta = result.roots[0].meta
     assert meta["estimated_cost_usd"] == round((1000 * 2.50 + 500 * 10.00) / 1_000_000, 6)
+
+
+class _ZeroTokenUsage:
+    def __init__(self):
+        self.prompt_tokens = 0
+        self.completion_tokens = 5
+        self.total_tokens = 5
+
+
+class _ZeroPromptResponse:
+    def __init__(self):
+        self.model = "gpt-4o-mini"
+        self.usage = _ZeroTokenUsage()
+
+
+def test_trace_meta_keeps_zero_token_values() -> None:
+    @trace
+    def llm():
+        return _ZeroPromptResponse()
+
+    result = trace.run(llm)
+    meta = result.roots[0].meta
+    assert meta["prompt_tokens"] == 0
+    assert meta["completion_tokens"] == 5
+    assert meta["total_tokens"] == 5

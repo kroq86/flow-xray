@@ -14,7 +14,7 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# gtype run  (execution tracing)
+# flow-xray run  (execution tracing)
 # ---------------------------------------------------------------------------
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -34,12 +34,26 @@ def cmd_run(args: argparse.Namespace) -> int:
     html_path = args.html or path.stem + "_trace.html"
     result.to_html(html_path, title=args.title or f"Trace: {path.name}")
     total, errs = _count_all(result.roots)
-    print(f"Wrote {html_path}  ({total} nodes, {errs} errors)", file=sys.stderr)
+    if total == 0:
+        print(
+            "Wrote "
+            f"{html_path} (0 nodes).\n"
+            "No traced calls ran. `flow-xray run` executes the file without entering "
+            "`if __name__ == \"__main__\"` blocks, so move a traced demo call to module scope "
+            "or call `trace.run(...)` inside the script.",
+            file=sys.stderr,
+        )
+        return 0
+    print(
+        f"Wrote {html_path} ({total} nodes, {errs} errors). "
+        "Open the HTML file in your browser to inspect the trace.",
+        file=sys.stderr,
+    )
     return 0
 
 
 # ---------------------------------------------------------------------------
-# gtype dot  (scalar Value graph — legacy)
+# flow-xray dot  (scalar Value graph — legacy)
 # ---------------------------------------------------------------------------
 
 def _demo_root() -> Any:
@@ -84,8 +98,15 @@ def cmd_export(args: argparse.Namespace) -> int:
     from flow_xray.export_html import write_standalone_viewer_html
     from flow_xray.value import Value
     path = Path(args.script)
+    if not path.is_file():
+        print(f"error: not a file: {path}", file=sys.stderr)
+        return 2
     ns: dict[str, Any] = {"__name__": "__main__", "__file__": str(path)}
-    exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), ns, ns)
+    try:
+        exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), ns, ns)
+    except Exception as exc:
+        print(f"error: script execution failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
     root = ns.get("root")
     if root is None:
         print("error: script must define variable `root` (a Value)", file=sys.stderr)
@@ -118,14 +139,14 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="flow-xray", description="flow-xray — execution graph debugger")
     sub = p.add_subparsers(dest="command", required=True)
 
-    # -- gtype run -------------------------------------------------------
+    # -- flow-xray run ---------------------------------------------------
     r = sub.add_parser("run", help="run a script with @trace, export HTML execution graph")
     r.add_argument("script", help="path to Python file using @trace")
     r.add_argument("--html", metavar="FILE.html", help="output path (default: <script>_trace.html)")
     r.add_argument("--title", metavar="TEXT", help="title shown in the viewer")
     r.set_defaults(func=cmd_run)
 
-    # -- gtype dot demo --------------------------------------------------
+    # -- flow-xray dot demo ----------------------------------------------
     d = sub.add_parser("dot", help="scalar-Value DOT subcommands")
     dot_sub = d.add_subparsers(dest="dot_cmd", required=True)
     dd = dot_sub.add_parser("demo", help="built-in (a*b+c).relu().tanh() graph")

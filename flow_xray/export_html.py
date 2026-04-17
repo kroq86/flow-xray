@@ -138,7 +138,7 @@ const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
 document.getElementById("sn").textContent=nodes.length;
 const errs=nodes.filter(n=>n.error).length;
 document.getElementById("se").textContent=errs;
-const total=TRACE.nodes.reduce((s,n)=>s+n.latency_ms,0);
+const total=nodes.reduce((s,n)=>s+n.latency_ms,0);
 document.getElementById("stm").textContent=total.toFixed(1)+"ms";
 let sumTok=0,sumCost=0;
 nodes.forEach(n=>{if(n.meta){if(n.meta.total_tokens)sumTok+=n.meta.total_tokens;if(n.meta.estimated_cost_usd)sumCost+=n.meta.estimated_cost_usd}});
@@ -208,7 +208,7 @@ async function render(){
     });
   }catch(e){
     console.error(e);
-    gc.innerHTML='<div id="hint" style="color:#f85149">WASM render failed. DOT below.</div>';
+    gc.innerHTML='<div id="hint" style="color:#f85149">WASM render failed, likely due to offline or blocked CDN access. DOT is shown below so the trace is still inspectable.</div>';
     const fb=document.getElementById("fb");fb.style.display="block";fb.textContent=dot;
   }
 }

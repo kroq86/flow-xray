@@ -29,7 +29,7 @@ from openai import OpenAI
 from flow_xray import trace
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-MODEL = os.environ.get("OAPENAI_MODEL", "gpt-4o-mini")
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 # --- State graph (canonical dedup) -------------------------------------------
 
@@ -129,6 +129,10 @@ def agent(query: str) -> str:
         plan = planner(query, context)
         action = plan.get("action", "answer")
         detail = plan.get("detail", "")
+
+        if step == 0 and action == "answer":
+            action = "tool"
+            detail = detail or query
 
         if action == "reason":
             thought = reason_step(query, detail)
