@@ -108,20 +108,27 @@ class TraceNode:
     latency_ms: float = 0.0
     children: list[TraceNode] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
+    kind: str | None = None
+    tags: dict[str, Any] = field(default_factory=dict)
     _stack_token: object | None = field(default=None, repr=False)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, t0: float = 0.0) -> dict[str, Any]:
         d: dict[str, Any] = {
             "id": self.node_id,
             "name": self.name,
             "inputs": {k: _safe_repr(v) for k, v in self.inputs.items()},
             "output": _safe_repr(self.output),
             "error": self.error,
+            "start_ms": round(self.start_ms - t0, 2),
             "latency_ms": round(self.latency_ms, 2),
-            "children": [c.to_dict() for c in self.children],
+            "children": [c.to_dict(t0) for c in self.children],
         }
         if self.meta:
             d["meta"] = self.meta
+        if self.kind is not None:
+            d["kind"] = self.kind
+        if self.tags:
+            d["tags"] = self.tags
         return d
 
 
@@ -197,20 +204,27 @@ def _count_all(roots: list[TraceNode]) -> tuple[int, int]:
 class TraceResult:
     """Holds a captured DAG and provides export helpers."""
 
-    __slots__ = ("roots", "return_value", "error")
+    __slots__ = ("roots", "return_value", "error", "_t0")
 
     def __init__(
         self,
         roots: list[TraceNode],
         return_value: Any = None,
         error: BaseException | None = None,
+        t0: float = 0.0,
     ) -> None:
         self.roots = roots
         self.return_value = return_value
         self.error = error
+        self._t0 = t0
 
     def to_dict(self) -> dict[str, Any]:
-        return {"nodes": [r.to_dict() for r in self.roots]}
+        return {"nodes": [r.to_dict(self._t0) for r in self.roots]}
+
+    def diff(self, other: "TraceResult") -> str:
+        """Compare self (old) with other (new). Returns standalone diff HTML."""
+        from flow_xray.export_html import diff_to_html
+        return diff_to_html(self, other)
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
@@ -269,6 +283,7 @@ class _TraceSession:
 
     def __init__(self) -> None:
         self.roots: list[TraceNode] = []
+        self._session_start_ms: float = time.perf_counter() * 1000
 
     @classmethod
     def _next_id(cls) -> str:
@@ -276,13 +291,14 @@ class _TraceSession:
             cls._id_counter += 1
             return f"t{cls._id_counter}"
 
-    def enter_node(self, name: str, inputs: dict) -> TraceNode:
+    def enter_node(self, name: str, inputs: dict, kind: str | None = None) -> TraceNode:
         stack = self._current_stack.get()
         node = TraceNode(
             name=name,
             node_id=self._next_id(),
             inputs=inputs,
             start_ms=time.perf_counter() * 1000,
+            kind=kind,
         )
         if stack:
             stack[-1].children.append(node)
@@ -335,12 +351,14 @@ class _Trace:
         *,
         redact: list[str] | tuple[str, ...] | set[str] | None = None,
         capture_output: bool = True,
+        kind: str | None = None,
     ) -> Callable:
         if fn is None:
             return lambda actual_fn: self(
                 actual_fn,
                 redact=redact,
                 capture_output=capture_output,
+                kind=kind,
             )
         redacted_keys = {str(item) for item in (redact or ())}
 
@@ -351,7 +369,7 @@ class _Trace:
                 if session is None:
                     return await fn(*args, **kwargs)
                 inputs = _redact_inputs(_bind_args(fn, args, kwargs), redacted_keys)
-                node = session.enter_node(fn.__qualname__, inputs)
+                node = session.enter_node(fn.__qualname__, inputs, kind=kind)
                 try:
                     result = await fn(*args, **kwargs)
                     session.exit_node(node, result if capture_output else "[redacted]", None)
@@ -368,7 +386,7 @@ class _Trace:
                 if session is None:
                     return fn(*args, **kwargs)
                 inputs = _redact_inputs(_bind_args(fn, args, kwargs), redacted_keys)
-                node = session.enter_node(fn.__qualname__, inputs)
+                node = session.enter_node(fn.__qualname__, inputs, kind=kind)
                 try:
                     result = fn(*args, **kwargs)
                     session.exit_node(node, result if capture_output else "[redacted]", None)
@@ -397,11 +415,23 @@ class _Trace:
                 err = exc
         if err is not None and raise_exceptions:
             raise err
-        return TraceResult(session.roots, return_value=rv, error=err)
+        return TraceResult(session.roots, return_value=rv, error=err, t0=session._session_start_ms)
 
     def capture(self) -> _TraceSession:
         """Return a context-manager session for manual use."""
         return _TraceSession()
+
+    @staticmethod
+    def tag(*labels: str, **kwargs: Any) -> None:
+        """Attach tags to the current trace node. Visible as badges in the viewer."""
+        session = _TraceSession.current()
+        stack = _TraceSession._current_stack.get()
+        if session is None or not stack:
+            return
+        t = stack[-1].tags
+        for label in labels:
+            t[label] = True
+        t.update(kwargs)
 
     @staticmethod
     def meta(**kwargs: Any) -> None:

@@ -68,6 +68,129 @@ def write_standalone_viewer_html(path: str | Path, dot: str, *, title: str = "fl
 
 
 # ---------------------------------------------------------------------------
+# Diff viewer
+# ---------------------------------------------------------------------------
+
+def _path_map(nodes, parent=""):
+    result = {}
+    counters = {}
+    for n in (nodes or []):
+        name = n["name"]
+        idx = counters.get(name, 0)
+        counters[name] = idx + 1
+        path = f"{parent}/{name}[{idx}]"
+        result[path] = n
+        result.update(_path_map(n.get("children", []), path))
+    return result
+
+
+def diff_to_html(old, new, *, title: str = "flow-xray diff") -> str:
+    """Compare old and new TraceResult, return standalone dark-theme diff HTML."""
+    old_dict = old.to_dict()
+    new_dict = new.to_dict()
+    old_map = _path_map(old_dict.get("nodes", []))
+    new_map = _path_map(new_dict.get("nodes", []))
+
+    all_paths = sorted(set(old_map) | set(new_map))
+    same = []
+    changed = []
+    removed = []
+    added = []
+
+    for path in all_paths:
+        in_old = path in old_map
+        in_new = path in new_map
+        if in_old and in_new:
+            old_out = old_map[path].get("output")
+            new_out = new_map[path].get("output")
+            old_err = old_map[path].get("error")
+            new_err = new_map[path].get("error")
+            if old_out == new_out and old_err == new_err:
+                same.append(path)
+            else:
+                changed.append((path, old_map[path], new_map[path]))
+        elif in_old:
+            removed.append((path, old_map[path]))
+        else:
+            added.append((path, new_map[path]))
+
+    safe_title = html.escape(title, quote=True)
+
+    def fmt_val(node, key):
+        v = node.get(key)
+        if v is None:
+            return '<span style="color:#484f58">null</span>'
+        return html.escape(str(v)[:500])
+
+    rows_html = ""
+    for path, old_n, new_n in changed:
+        rows_html += f"""<div class="diff-row">
+  <span class="diff-badge diff-changed">changed</span>
+  <code class="diff-path">{html.escape(path)}</code>
+  <div class="diff-cols">
+    <div class="diff-col"><div class="diff-lbl">Old output</div><pre class="diff-pre">{fmt_val(old_n, "output")}</pre></div>
+    <div class="diff-col"><div class="diff-lbl">New output</div><pre class="diff-pre">{fmt_val(new_n, "output")}</pre></div>
+  </div>
+</div>"""
+    for path, old_n in removed:
+        rows_html += f"""<div class="diff-row">
+  <span class="diff-badge diff-removed">removed</span>
+  <code class="diff-path">{html.escape(path)}</code>
+  <div class="diff-cols">
+    <div class="diff-col"><div class="diff-lbl">Output</div><pre class="diff-pre">{fmt_val(old_n, "output")}</pre></div>
+  </div>
+</div>"""
+    for path, new_n in added:
+        rows_html += f"""<div class="diff-row">
+  <span class="diff-badge diff-added">added</span>
+  <code class="diff-path">{html.escape(path)}</code>
+  <div class="diff-cols">
+    <div class="diff-col"><div class="diff-lbl">Output</div><pre class="diff-pre">{fmt_val(new_n, "output")}</pre></div>
+  </div>
+</div>"""
+
+    same_paths = html.escape(", ".join(same[:20]) + ("…" if len(same) > 20 else ""))
+    summary = f"{len(same)} same, {len(changed)} changed, {len(removed)} removed, {len(added)} added"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{safe_title}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;padding:24px}}
+h1{{font-size:18px;font-weight:600;margin-bottom:8px;color:#f0f6fc}}
+.summary{{font-size:13px;color:#8b949e;margin-bottom:20px}}
+.diff-row{{border:1px solid #30363d;border-radius:8px;background:#161b22;padding:14px;margin-bottom:12px}}
+.diff-badge{{border-radius:4px;font-size:11px;padding:2px 7px;font-weight:600;margin-right:8px}}
+.diff-changed{{background:#9e6a03;color:#f0f6fc}}
+.diff-removed{{background:#da3633;color:#fff}}
+.diff-added{{background:#238636;color:#fff}}
+.diff-path{{font-size:12px;color:#79c0ff;font-family:'SF Mono','Fira Code',monospace}}
+.diff-cols{{display:flex;gap:12px;margin-top:10px}}
+.diff-col{{flex:1}}
+.diff-lbl{{font-size:10px;text-transform:uppercase;color:#8b949e;margin-bottom:4px;letter-spacing:.5px}}
+.diff-pre{{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;font-size:12px;font-family:'SF Mono','Fira Code',monospace;white-space:pre-wrap;word-break:break-all;color:#c9d1d9}}
+details{{border:1px solid #30363d;border-radius:8px;background:#161b22;padding:10px;margin-top:16px}}
+summary{{cursor:pointer;font-size:13px;color:#8b949e}}
+.same-list{{font-size:11px;color:#484f58;margin-top:8px;font-family:'SF Mono','Fira Code',monospace;word-break:break-all}}
+</style>
+</head>
+<body>
+<h1>{safe_title}</h1>
+<div class="summary">{html.escape(summary)}</div>
+{rows_html}
+<details>
+<summary>{len(same)} unchanged node{'' if len(same)==1 else 's'}</summary>
+<div class="same-list">{same_paths}</div>
+</details>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
 # Execution-trace viewer (dark theme, interactive)
 # ---------------------------------------------------------------------------
 
@@ -169,6 +292,19 @@ header h1{font-size:15px;font-weight:600}
 .badge{border-radius:4px;font-size:10px;padding:1px 5px;margin-left:4px;vertical-align:middle}
 .badge.warn{background:#9e6a03;color:#f0f6fc}
 .badge.err2{background:#da3633;color:#fff}
+.gantt-hdr{font-size:11px;color:#8b949e;padding:0 76px 6px 196px;display:flex;justify-content:space-between}
+.gantt-rows{display:flex;flex-direction:column;gap:2px}
+.gantt-row{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:4px;cursor:pointer;height:28px}
+.gantt-row:hover{background:#1c2128}
+.gantt-row.selected{background:#1a3a5c}
+.gantt-lbl{width:180px;flex-shrink:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#c9d1d9;font-family:'SF Mono','Fira Code',monospace}
+.gantt-wrap{flex:1;position:relative;height:12px;background:#21262d;border-radius:2px}
+.gantt-bar{position:absolute;top:0;height:100%;border-radius:2px;min-width:3px}
+.gantt-ms{width:65px;flex-shrink:0;font-size:11px;color:#8b949e;text-align:right;white-space:nowrap}
+.dv-col{max-height:72px;overflow:hidden;position:relative}
+.dv-col::after{content:'';position:absolute;bottom:0;left:0;right:0;height:18px;background:linear-gradient(transparent,#161b22)}
+.xbtn{background:none;border:none;color:#58a6ff;font-size:11px;cursor:pointer;padding:2px 0;display:block}
+.xbtn:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -193,6 +329,7 @@ header h1{font-size:15px;font-weight:600}
  <button class="modebtn" id="mode-graph" data-mode="graph" type="button">Graph</button>
  <button class="modebtn" id="mode-timeline" data-mode="timeline" type="button">Timeline</button>
  <button class="modebtn" id="mode-raw" data-mode="raw" type="button">Raw</button>
+ <button class="modebtn" id="mode-gantt" data-mode="gantt" type="button">Gantt</button>
 </div>
 <div id="main">
  <div id="content">
@@ -207,6 +344,7 @@ header h1{font-size:15px;font-weight:600}
    </div>
    <pre id="rawtrace"></pre>
   </section>
+  <section class="view" id="ganttview" style="padding:18px;overflow-y:auto"></section>
  </div>
  <aside id="det"><div id="hint">Click a node or timeline item to inspect</div></aside>
 </div>
@@ -279,7 +417,7 @@ function mkDot(){
   d+='  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.3,0.15"];\n';
   d+='  edge [color="#30363d",arrowsize=0.7];\n';
   for(const n of nodes){
-    const c=n.error?"#da3633":n.latency_ms>1000?"#9e6a03":"#238636";
+    const c=n.error?"#da3633":(n.latency_ms||0)>1000?"#9e6a03":n.kind==='llm'?"#1f6feb":n.kind==='tool'?"#8250df":n.kind==='agent'?"#0ea5e9":"#238636";
     let lb=n.name+"\\n"+fmtMs(n.latency_ms)+"ms";
     if(n.meta&&n.meta.total_tokens!=null)lb+="\\n"+n.meta.total_tokens+" tok";
     d+=`  ${n.id} [label="${lb}",fillcolor="${c}",fontcolor="white",tooltip="${n.id}"];\n`;
@@ -336,11 +474,11 @@ function renderOverview(){
 
   let h=`
     <div class="cards">
-      <div class="card"><div class="k">Nodes</div><div class="v">${nodes.length}</div></div>
-      <div class="card"><div class="k">LLM Calls</div><div class="v">${totals.llmCalls}</div></div>
+      <div class="card" data-action="root"><div class="k">Nodes</div><div class="v">${nodes.length}</div></div>
+      <div class="card" data-action="llm"><div class="k">LLM Calls</div><div class="v">${totals.llmCalls}</div></div>
       <div class="card"><div class="k">Max Depth</div><div class="v">${totals.maxDepth}</div></div>
-      <div class="card"><div class="k">Errors</div><div class="v">${totals.errors}</div></div>
-      <div class="card"><div class="k">Tokens</div><div class="v">${totals.tokens||0}</div></div>
+      <div class="card" data-action="errors"><div class="k">Errors</div><div class="v">${totals.errors}</div></div>
+      <div class="card" data-action="gantt"><div class="k">Tokens</div><div class="v">${totals.tokens||0}</div></div>
       <div class="card"><div class="k">Redactions</div><div class="v">${totals.redactions}</div></div>
     </div>`;
 
@@ -396,7 +534,7 @@ function renderOverview(){
   h+='<div class="panel"><h3>Repeated Calls</h3>';
   if(retries.length){
     retries.slice(0,8).forEach(([name,count])=>{
-      h+=`<div class="rowitem"><div class="top"><b>${esc(name)}</b><span class="badge warn">${count}×</span></div>
+      h+=`<div class="rowitem ri-clickable" data-search="${esc(name)}"><div class="top"><b>${esc(name)}</b><span class="badge warn">${count}×</span></div>
         <div class="small mono">called ${count} times — possible retry or loop</div></div>`;
     });
   }else{
@@ -425,6 +563,24 @@ function renderOverview(){
   ov.innerHTML=h;
   ov.querySelectorAll('[data-nid]').forEach(el=>{
     el.addEventListener('click',()=>selectNode(el.getAttribute('data-nid')));
+  });
+  ov.querySelectorAll('.card[data-action]').forEach(card=>{
+    card.style.cursor='pointer';
+    card.addEventListener('click',()=>{
+      const act=card.dataset.action;
+      if(act==='errors'){const n=nodes.find(n=>n.error);if(n){selectNode(n.id);setMode('timeline');}}
+      else if(act==='llm'){const n=nodes.find(n=>n.meta&&n.meta.model);if(n){selectNode(n.id);setMode('timeline');}}
+      else if(act==='root'&&nodes.length){selectNode(nodes[0].id);setMode('graph');}
+      else if(act==='gantt'){setMode('gantt');}
+    });
+  });
+  ov.querySelectorAll('.ri-clickable[data-search]').forEach(el=>{
+    el.style.cursor='pointer';
+    el.addEventListener('click',()=>{
+      searchInput.value=el.dataset.search;
+      applySearch();
+      setMode('timeline');
+    });
   });
 }
 
@@ -485,19 +641,31 @@ function detailText(n){
   return parts.join("\n\n");
 }
 
+function dvBlock(text){
+  const e=esc(text);
+  if(text.length<250)return`<div class="dv">${e}</div>`;
+  const uid='x'+Math.random().toString(36).slice(2,8);
+  return`<div class="dv dv-col" id="${uid}">${e}</div><button class="xbtn" data-xid="${uid}">Show more</button>`;
+}
+
 function showDet(n){
   selectedNode=n||null;
   if(!n){det.innerHTML='<div id="hint">Click a node or timeline item to inspect</div>';return}
   const sub=subtreeStats.get(n.id)||{totalLatency:n.latency_ms||0,totalTokens:n.meta&&n.meta.total_tokens?n.meta.total_tokens:0,count:1};
   const st=n.error?`<span class="er">ERROR</span>`:`<span class="ok">OK</span>`;
   const ms=n.latency_ms.toFixed(2);
+  const summaryText=`status: ${n.error?"ERROR":"OK"}\nnode: ${n.id}\nparent: ${n.pid || "(root)"}\ndepth: ${n.depth}\nchildren: ${(n.children||[]).length}\nlatency: ${ms} ms\nsubtree latency: ${sub.totalLatency.toFixed(2)} ms\nsubtree nodes: ${sub.count}${sub.totalTokens?`\nsubtree tokens: ${sub.totalTokens}`:""}${n.kind?`\nkind: ${n.kind}`:""}`;
   let h=`<div class="dt">${esc(n.name)}</div>`;
-  h+=`<div class="ds"><div class="dl">Summary</div><div class="dv">status: ${n.error?"ERROR":"OK"}\nnode: ${esc(n.id)}\nparent: ${esc(n.pid || "(root)")}\ndepth: ${n.depth}\nchildren: ${(n.children||[]).length}\nlatency: ${ms} ms\nsubtree latency: ${sub.totalLatency.toFixed(2)} ms\nsubtree nodes: ${sub.count}${sub.totalTokens?`\nsubtree tokens: ${sub.totalTokens}`:""}</div></div>`;
+  h+=`<div class="ds"><div class="dl">Summary</div>${dvBlock(summaryText)}</div>`;
   h+=`<div class="ds"><div class="dl">Status</div><div class="dv">${st}</div></div>`;
-  if(n.error)h+=`<div class="ds"><div class="dl">Error</div><div class="dv er">${esc(n.error)}</div></div>`;
+  if(n.tags&&Object.keys(n.tags).length){
+    const tagItems=Object.entries(n.tags).map(([k,v])=>v===true?`<span class="badge warn">${esc(k)}</span>`:`<span class="badge warn">${esc(k)}:${esc(String(v))}</span>`).join(' ');
+    h+=`<div class="ds"><div class="dl">Tags</div><div class="dv">${tagItems}</div></div>`;
+  }
+  if(n.error)h+=`<div class="ds"><div class="dl">Error</div>${dvBlock(n.error)}</div>`;
   const inp=Object.entries(n.inputs||{});
   if(inp.length){h+=`<div class="ds"><div class="dl">Input</div>`;inp.forEach(([k,v])=>{h+=`<div class="dv"><b>${esc(k)}</b>: ${esc(v)}</div>`});h+=`</div>`}
-  if(n.output!=null)h+=`<div class="ds"><div class="dl">Output</div><div class="dv">${esc(String(n.output))}</div></div>`;
+  if(n.output!=null)h+=`<div class="ds"><div class="dl">Output</div>${dvBlock(String(n.output))}</div>`;
   if(n.meta){
     const m=n.meta;
     if(m.model)h+=`<div class="ds"><div class="dl">Model</div><div class="dv">${esc(m.model)}</div></div>`;
@@ -508,8 +676,14 @@ function showDet(n){
     if(toks.length)h+=`<div class="ds"><div class="dl">Tokens</div><div class="dv">${esc(toks.join("  ·  "))}</div></div>`;
     if(m.estimated_cost_usd!=null)h+=`<div class="ds"><div class="dl">Est. cost</div><div class="dv warn">$${m.estimated_cost_usd.toFixed(6)}</div></div>`;
   }
-  h+=`<div class="ds"><div class="dl">Raw Node JSON</div><div class="dv">${esc(JSON.stringify(n,null,2))}</div></div>`;
+  h+=`<div class="ds"><div class="dl">Raw Node JSON</div>${dvBlock(JSON.stringify(n,null,2))}</div>`;
   det.innerHTML=h;
+  det.querySelectorAll('.xbtn[data-xid]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      const t=document.getElementById(b.dataset.xid);
+      if(t){const c=t.classList.toggle('dv-col');b.textContent=c?'Show more':'Show less';}
+    });
+  });
 }
 
 function syncSelection(nodeId){
@@ -525,12 +699,20 @@ function syncSelection(nodeId){
   }
 }
 
+function syncGanttSelection(nodeId){
+  document.querySelectorAll('#ganttview .gantt-row.selected').forEach(el=>el.classList.remove('selected'));
+  if(!nodeId)return;
+  const row=document.querySelector(`#ganttview .gantt-row[data-nid="${nodeId}"]`);
+  if(row){row.classList.add('selected');row.scrollIntoView({block:'nearest'});}
+}
+
 function selectNode(nodeId){
   const node=byId[nodeId];
   if(!node)return;
   showDet(node);
   syncSelection(nodeId);
   syncOverviewSelection(nodeId);
+  syncGanttSelection(nodeId);
 }
 
 async function copyDetails(){
@@ -636,9 +818,34 @@ function syncOverviewSelection(nodeId){
   if(row){row.classList.add('selected');row.scrollIntoView({block:'nearest'});}
 }
 
+function renderGantt(){
+  const view=document.getElementById("ganttview");
+  const sorted=[...nodes].sort((a,b)=>(a.start_ms||0)-(b.start_ms||0));
+  const totalSpan=Math.max(...nodes.map(n=>(n.start_ms||0)+(n.latency_ms||0)),1);
+  let h=`<div class="gantt-hdr"><span>0 ms</span><span>${fmtMs(totalSpan)} ms total</span></div><div class="gantt-rows">`;
+  sorted.forEach(n=>{
+    const left=((n.start_ms||0)/totalSpan*100).toFixed(3);
+    const width=(Math.max(n.latency_ms||0,totalSpan*0.003)/totalSpan*100).toFixed(3);
+    const col=n.error?'#da3633':(n.latency_ms||0)>1000?'#d29922':n.kind==='llm'?'#1f6feb':n.kind==='tool'?'#8250df':'#238636';
+    const indent=Math.min((n.depth||0)*12,60);
+    h+=`<div class="gantt-row" data-nid="${esc(n.id)}">
+      <div class="gantt-lbl" style="padding-left:${indent}px" title="${esc(n.name)}">${esc(n.name)}</div>
+      <div class="gantt-wrap"><div class="gantt-bar" style="left:${left}%;width:${width}%;background:${col}"></div></div>
+      <div class="gantt-ms">${fmtMs(n.latency_ms)} ms</div>
+    </div>`;
+  });
+  h+='</div>';
+  view.innerHTML=h;
+  view.querySelectorAll('.gantt-row[data-nid]').forEach(el=>{
+    el.addEventListener('click',()=>selectNode(el.getAttribute('data-nid')));
+  });
+  if(selectedNode)syncGanttSelection(selectedNode.id);
+}
+
 renderOverview();
 renderTimeline();
 renderRaw();
+renderGantt();
 bindToolbar();
 renderGraph();
 </script>

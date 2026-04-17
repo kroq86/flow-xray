@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.3
+
+**Viewer UX**
+- Gantt tab: horizontal bar chart of all nodes sorted by wall-clock start time — shows real async overlap at a glance. Bars colored by kind/error/latency; clickable rows select node in inspector.
+- Clickable stat cards in Overview: click Errors → jump to first error node in Timeline; click LLM Calls → first LLM node; click Nodes → root in Graph; click Tokens → Gantt.
+- Repeated Calls rows now clickable: click a function name → sets search filter and switches to Timeline showing all instances.
+- Expand/collapse for long values in Node Inspector: inputs, outputs, and raw JSON truncate at 250 chars with a Show more toggle.
+
+**Tracing API**
+- `@trace(kind="llm"|"tool"|"agent")` — first-class node typing. Kind is serialized in trace data, used for graph coloring (llm=blue, tool=purple, agent=teal) and shown in Node Inspector.
+- `trace.tag("label", key=value)` — attach arbitrary string labels or key-value tags to the current node. Tags appear as badges in Node Inspector.
+- `TraceResult.diff(other)` — compare two trace runs; returns standalone dark-theme HTML showing changed/removed/added nodes with old vs new output side by side.
+- `start_ms` is now included in serialized node data (relative to trace session start), enabling the Gantt view and future timeline analysis.
+
 ## 0.3.2
 
 - Overhauled the Overview tab into a single unified analysis surface — no separate tab needed.
