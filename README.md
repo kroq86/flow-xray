@@ -268,6 +268,12 @@ But when your agent pipeline branches, retries, or chains 6 tools — you don't 
 
 flow-xray is **not** an agent framework. It's the layer **below** them — like Chrome DevTools is to browsers.
 
+## Docs
+
+- [FAQ](docs/faq.md)
+- [Using flow-xray with LangGraph](docs/langgraph.md)
+- [flow-xray vs LangSmith](docs/flow-xray-vs-langsmith.md)
+
 ## Compatibility
 
 - **Python** 3.10, 3.11, 3.12, 3.13, 3.14 — tested
