@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2
+
+- Overhauled the Overview tab into a single unified analysis surface — no separate tab needed.
+- Added **Critical Path** panel: traces the heaviest-latency chain from root to leaf with clickable nodes.
+- Added **Latency Waterfall**: top-10 nodes by own latency with percentage-of-total bars, replaces the old "Slowest Nodes" list.
+- Added **Depth Distribution**: bar chart of node counts per call depth, reveals flat vs deeply nested agent structure.
+- Added **Repeated Calls**: detects functions called more than once, flags likely retry loops.
+- Added **Error Analysis**: lists every errored node with parent context and truncated error message, each row clickable to Node Inspector.
+- Clicking a waterfall row or critical-path node selects it across Graph, Timeline, and Node Inspector (cross-tab sync).
+
 ## 0.3.1
 
 - Refreshed the package README and PyPI long description with a clearer local-first value proposition.
