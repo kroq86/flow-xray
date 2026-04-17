@@ -25,5 +25,14 @@ def test_trace_html_uses_flattened_total_latency() -> None:
     assert "offline or blocked CDN access" in viewer_html
     assert 'id="search"' in viewer_html
     assert 'id="copydet"' in viewer_html
+    assert 'id="mode-overview"' in viewer_html
+    assert 'id="mode-timeline"' in viewer_html
+    assert 'id="mode-raw"' in viewer_html
+    assert 'id="rawfilter"' in viewer_html
+    assert 'id="rawtrace"' in viewer_html
+    assert "renderOverview()" in viewer_html
+    assert "renderTimeline()" in viewer_html
+    assert "renderRaw()" in viewer_html
+    assert "Raw Node JSON" in viewer_html
     assert "bindToolbar()" in viewer_html
     assert "navigator.clipboard.writeText" in viewer_html
