@@ -153,6 +153,22 @@ header h1{font-size:15px;font-weight:600}
   #det{width:auto;border-left:none;border-top:1px solid #30363d;max-height:42vh}
   .grid2{grid-template-columns:1fr}
 }
+.ri-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;padding:4px 6px;border-radius:4px;cursor:pointer}
+.ri-bar-row:hover{background:#1c2128}
+.ri-bar-row.selected{background:#1a3a5c}
+.ri-bar-row.nocursor{cursor:default}
+.ri-bg{flex:1;background:#21262d;border-radius:3px;height:7px;overflow:hidden;min-width:60px}
+.ri-fill{height:100%;border-radius:3px}
+.ri-lbl{font-size:12px;min-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#c9d1d9;font-family:'SF Mono','Fira Code',monospace}
+.ri-val{font-size:11px;color:#8b949e;min-width:60px;text-align:right;white-space:nowrap}
+.path-chain{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 0}
+.pnode{background:#21262d;border:1px solid #30363d;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;font-family:'SF Mono','Fira Code',monospace;white-space:nowrap;color:#c9d1d9}
+.pnode:hover{background:#30363d;border-color:#58a6ff}
+.pnode.er{border-color:#f85149}
+.psep{color:#484f58;font-size:13px;user-select:none}
+.badge{border-radius:4px;font-size:10px;padding:1px 5px;margin-left:4px;vertical-align:middle}
+.badge.warn{background:#9e6a03;color:#f0f6fc}
+.badge.err2{background:#da3633;color:#fff}
 </style>
 </head>
 <body>
@@ -277,54 +293,139 @@ function topNodes(selector, limit=5){
 }
 
 function renderOverview(){
-  const overview=document.getElementById("overview");
+  const ov=document.getElementById("overview");
+
+  // --- critical path ---
+  function criticalPath(){
+    const roots=TRACE.nodes||[];
+    if(!roots.length)return[];
+    let cur=roots.reduce((a,b)=>
+      (subtreeStats.get(a.id)?.totalLatency||0)>=(subtreeStats.get(b.id)?.totalLatency||0)?a:b
+    );
+    const path=[cur];
+    while((cur.children||[]).length){
+      cur=cur.children.reduce((a,b)=>
+        (subtreeStats.get(a.id)?.totalLatency||0)>=(subtreeStats.get(b.id)?.totalLatency||0)?a:b
+      );
+      path.push(cur);
+    }
+    return path;
+  }
+
+  const maxLat=Math.max(...nodes.map(n=>n.latency_ms||0),1);
+  const topByLat=[...nodes].sort((a,b)=>(b.latency_ms||0)-(a.latency_ms||0)).slice(0,10);
+  const depthMap={};
+  nodes.forEach(n=>{depthMap[n.depth]=(depthMap[n.depth]||0)+1;});
+  const maxDepthCount=Math.max(...Object.values(depthMap),1);
+  const nameCounts={};
+  nodes.forEach(n=>{nameCounts[n.name]=(nameCounts[n.name]||0)+1;});
+  const retries=Object.entries(nameCounts).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]);
+  const errorNodes=nodes.filter(n=>n.error);
   const modelRows=Object.entries(modelTotals).sort((a,b)=>b[1].tokens-a[1].tokens);
-  const slowRows=topNodes(n=>n.latency_ms||0).map(n=>`
-    <div class="rowitem">
-      <div class="top"><b>${esc(n.name)}</b><span class="small mono">${fmtMs(n.latency_ms)} ms</span></div>
-      <div class="small mono">${esc(n.id)} · depth ${n.depth}</div>
-    </div>`).join("");
   const tokenRows=topNodes(n=>n.meta&&n.meta.total_tokens?n.meta.total_tokens:0).filter(n=>n.meta&&n.meta.total_tokens).map(n=>`
     <div class="rowitem">
       <div class="top"><b>${esc(n.name)}</b><span class="small mono">${n.meta.total_tokens} tok</span></div>
       <div class="small mono">${esc(n.id)}${n.meta&&n.meta.model?` · ${esc(n.meta.model)}`:""}</div>
-    </div>`).join("") || '<div class="small">No token-tracked nodes</div>';
+    </div>`).join("")||'<div class="small">No token-tracked nodes</div>';
   const modelCards=modelRows.map(([model,data])=>`
     <div class="rowitem">
       <div class="top"><b>${esc(model)}</b><span class="small mono">${data.calls} calls</span></div>
       <div class="small mono">${data.tokens} tok · $${data.cost.toFixed(6)}</div>
-    </div>`).join("") || '<div class="small">No model metadata</div>';
-  overview.innerHTML=`
+    </div>`).join("")||'<div class="small">No model metadata</div>';
+  const critPath=criticalPath();
+
+  let h=`
     <div class="cards">
-      <div class="card"><div class="k">Roots</div><div class="v">${TRACE.nodes.length}</div></div>
+      <div class="card"><div class="k">Nodes</div><div class="v">${nodes.length}</div></div>
       <div class="card"><div class="k">LLM Calls</div><div class="v">${totals.llmCalls}</div></div>
       <div class="card"><div class="k">Max Depth</div><div class="v">${totals.maxDepth}</div></div>
-      <div class="card"><div class="k">Redactions</div><div class="v">${totals.redactions}</div></div>
       <div class="card"><div class="k">Errors</div><div class="v">${totals.errors}</div></div>
       <div class="card"><div class="k">Tokens</div><div class="v">${totals.tokens||0}</div></div>
-    </div>
-    <div class="grid2">
-      <div class="panel">
-        <h3>Slowest Nodes</h3>
-        <div class="list">${slowRows}</div>
-      </div>
-      <div class="panel">
-        <h3>Token-Heavy Nodes</h3>
-        <div class="list">${tokenRows}</div>
-      </div>
-      <div class="panel">
-        <h3>Models</h3>
-        <div class="list">${modelCards}</div>
-      </div>
-      <div class="panel">
-        <h3>Trace Summary</h3>
-        <div class="list">
-          <div class="rowitem"><div class="top"><b>Total Latency</b><span class="small mono">${total.toFixed(1)} ms</span></div></div>
-          <div class="rowitem"><div class="top"><b>Estimated Cost</b><span class="small mono">$${totals.cost.toFixed(6)}</span></div></div>
-          <div class="rowitem"><div class="top"><b>Search Tip</b><span class="small">Use the top search box to filter graph, timeline, and raw JSON.</span></div></div>
-        </div>
-      </div>
+      <div class="card"><div class="k">Redactions</div><div class="v">${totals.redactions}</div></div>
     </div>`;
+
+  // critical path — full width
+  h+='<div class="panel" style="margin-bottom:14px"><h3>Critical Path</h3>';
+  if(critPath.length){
+    h+='<div class="path-chain">';
+    critPath.forEach((n,i)=>{
+      if(i)h+='<span class="psep">→</span>';
+      h+=`<button class="pnode${n.error?' er':''}" data-nid="${esc(n.id)}" title="${esc(n.id)}">${esc(n.name)}<span style="color:#8b949e;font-size:10px;margin-left:4px">${fmtMs(n.latency_ms)}ms</span></button>`;
+    });
+    h+='</div>';
+    const cpLat=critPath.reduce((s,n)=>s+(n.latency_ms||0),0);
+    h+=`<div class="small" style="margin-top:4px">${critPath.length} node${critPath.length>1?'s':''} · ${cpLat.toFixed(1)} ms along path</div>`;
+  }else{
+    h+='<div class="small">No nodes</div>';
+  }
+  h+='</div>';
+
+  // waterfall — full width
+  h+='<div class="panel" style="margin-bottom:14px"><h3>Latency Waterfall <span class="small">(top 10)</span></h3>';
+  topByLat.forEach(n=>{
+    const pct=((n.latency_ms||0)/maxLat*100).toFixed(1);
+    const col=n.error?'#da3633':(n.latency_ms||0)>1000?'#d29922':'#238636';
+    const sharePct=total>0?((n.latency_ms||0)/total*100).toFixed(1):'0.0';
+    h+=`<div class="ri-bar-row" data-nid="${esc(n.id)}">
+      <span class="ri-lbl">${esc(n.name)}</span>
+      <div class="ri-bg"><div class="ri-fill" style="width:${pct}%;background:${col}"></div></div>
+      <span class="ri-val">${fmtMs(n.latency_ms)} ms · ${sharePct}%</span>
+    </div>`;
+  });
+  h+='</div>';
+
+  h+='<div class="grid2">';
+
+  // token-heavy + models
+  h+=`<div class="panel"><h3>Token-Heavy Nodes</h3><div class="list">${tokenRows}</div></div>`;
+  h+=`<div class="panel"><h3>Models</h3><div class="list">${modelCards}</div></div>`;
+
+  // depth distribution
+  h+='<div class="panel"><h3>Depth Distribution</h3>';
+  Object.entries(depthMap).sort((a,b)=>+a[0]-+b[0]).forEach(([depth,count])=>{
+    const pct=(count/maxDepthCount*100).toFixed(1);
+    h+=`<div class="ri-bar-row nocursor">
+      <span class="ri-lbl">depth ${depth}</span>
+      <div class="ri-bg"><div class="ri-fill" style="width:${pct}%;background:#1f6feb"></div></div>
+      <span class="ri-val">${count} node${count>1?'s':''}</span>
+    </div>`;
+  });
+  h+='</div>';
+
+  // repeated calls
+  h+='<div class="panel"><h3>Repeated Calls</h3>';
+  if(retries.length){
+    retries.slice(0,8).forEach(([name,count])=>{
+      h+=`<div class="rowitem"><div class="top"><b>${esc(name)}</b><span class="badge warn">${count}×</span></div>
+        <div class="small mono">called ${count} times — possible retry or loop</div></div>`;
+    });
+  }else{
+    h+='<div class="small" style="color:#484f58;padding:4px 0">No repeated calls detected</div>';
+  }
+  h+='</div>';
+
+  // error analysis
+  h+='<div class="panel"><h3>Error Analysis</h3>';
+  if(errorNodes.length){
+    errorNodes.forEach(n=>{
+      const parentName=n.pid&&byId[n.pid]?byId[n.pid].name:null;
+      h+=`<div class="rowitem" data-nid="${esc(n.id)}" style="cursor:pointer">
+        <div class="top"><b class="er">${esc(n.name)}</b><span class="small mono">depth ${n.depth}</span></div>
+        ${parentName?`<div class="small mono" style="margin-top:2px">inside: ${esc(parentName)}</div>`:''}
+        <div class="small mono er" style="margin-top:3px">${esc(String(n.error||'').slice(0,120))}</div>
+      </div>`;
+    });
+  }else{
+    h+='<div class="small" style="color:#484f58;padding:4px 0">No errors</div>';
+  }
+  h+='</div>';
+
+  h+='</div>'; // grid2
+
+  ov.innerHTML=h;
+  ov.querySelectorAll('[data-nid]').forEach(el=>{
+    el.addEventListener('click',()=>selectNode(el.getAttribute('data-nid')));
+  });
 }
 
 function renderTimeline(query=""){
@@ -429,6 +530,7 @@ function selectNode(nodeId){
   if(!node)return;
   showDet(node);
   syncSelection(nodeId);
+  syncOverviewSelection(nodeId);
 }
 
 async function copyDetails(){
@@ -525,6 +627,13 @@ async function renderGraph(){
     console.error(e);
     gc.innerHTML='<div id="hint" style="color:#f85149">WASM render failed, likely due to offline or blocked CDN access. Graph mode is unavailable, but Timeline and Raw modes still work below.</div>';
   }
+}
+
+function syncOverviewSelection(nodeId){
+  document.querySelectorAll('#overview .ri-bar-row.selected').forEach(el=>el.classList.remove('selected'));
+  if(!nodeId)return;
+  const row=document.querySelector(`#overview .ri-bar-row[data-nid="${nodeId}"]`);
+  if(row){row.classList.add('selected');row.scrollIntoView({block:'nearest'});}
 }
 
 renderOverview();
