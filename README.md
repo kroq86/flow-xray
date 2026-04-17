@@ -46,6 +46,29 @@ Open `trace.html` — you get a local debug artifact with:
 
 No server, no account, no log viewer — one local HTML file.
 
+## The main use case
+
+Your agent's final answer looks fine, but you do not trust the middle.
+
+You want to see:
+
+- which LLM calls happened
+- which tool calls ran
+- where the run branched or nested
+- where an error or retry happened
+- where tokens and cost accumulated
+
+`flow-xray` is built for that exact debugging job.
+
+## Who this is for
+
+`flow-xray` is most useful for:
+
+- LangGraph users who want local tracing without hosted tooling
+- LangChain users debugging tool calls and intermediate steps
+- developers building Python tool-calling agents
+- people who want one local trace artifact they can inspect or share after redaction
+
 ## Install
 
 ```bash
@@ -252,6 +275,32 @@ Treat trace files as local debugging artifacts unless you have explicitly review
 - hidden sensitive outputs with `capture_output=False`
 - checked the generated HTML once before posting it publicly
 
+## Why not LangSmith or plain logs?
+
+### Use flow-xray when you want
+
+- local-first debugging
+- one HTML file you can open immediately
+- graph and timeline views, not only logs
+- no account and no hosted tracing requirement
+
+### Use plain logs when you want
+
+- quick event-level debugging
+- a tiny amount of output
+- no structured trace at all
+
+### Use hosted tracing tools when you want
+
+- team dashboards
+- long-term trace storage
+- production monitoring
+- centralized evaluation workflows
+
+`flow-xray` is best when your question is:
+
+> What actually happened inside this Python agent run, locally, right now?
+
 ### What you see
 
 - **Nodes** = function calls (name + latency + tokens)
@@ -270,6 +319,7 @@ flow-xray is **not** an agent framework. It's the layer **below** them — like 
 
 ## Docs
 
+- [Debug Python agent runs locally](docs/debug-python-agents.md)
 - [FAQ](docs/faq.md)
 - [Using flow-xray with LangGraph](docs/langgraph.md)
 - [flow-xray vs LangSmith](docs/flow-xray-vs-langsmith.md)
