@@ -23,3 +23,7 @@ def test_trace_html_uses_flattened_total_latency() -> None:
     viewer_html = trace_to_standalone_html(result)
     assert "const total=nodes.reduce((s,n)=>s+n.latency_ms,0);" in viewer_html
     assert "offline or blocked CDN access" in viewer_html
+    assert 'id="search"' in viewer_html
+    assert 'id="copydet"' in viewer_html
+    assert "bindToolbar()" in viewer_html
+    assert "navigator.clipboard.writeText" in viewer_html

@@ -134,6 +134,21 @@ def call_llm(prompt):
     return resp.choices[0].message.content
 ```
 
+### Redaction and share-safe traces
+
+Use decorator options when a trace may contain secrets or bulky payloads:
+
+```python
+from flow_xray import trace
+
+@trace(redact={"api_key", "authorization"}, capture_output=False)
+def call_service(api_key, payload):
+    ...
+```
+
+- `redact={...}` masks matching argument names and nested dict keys as `[redacted]`
+- `capture_output=False` keeps the real return value in Python, but stores `[redacted]` in the HTML trace
+
 ### Safety note
 
 `flow-xray` serializes function inputs, outputs, errors, and attached metadata into the generated HTML file. Treat trace files as local debugging artifacts: avoid tracing secrets or redact sensitive payloads before sharing the HTML with others.
@@ -172,6 +187,8 @@ flow-xray is **not** an agent framework. It's the layer **below** them — like 
 - parent/child relationships (call stack → DAG)
 
 `result.to_html()` embeds the trace as JSON in a self-contained HTML page that renders via WASM Graphviz (CDN, works offline after first load).
+
+The trace viewer also includes search, zoom/reset controls, and copy-details for the currently selected node.
 
 ## Also included
 

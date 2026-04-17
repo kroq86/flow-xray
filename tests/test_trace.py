@@ -114,6 +114,28 @@ def test_trace_no_session_passthrough() -> None:
     assert fn(10) == 11
 
 
+def test_trace_decorator_can_redact_inputs() -> None:
+    @trace(redact={"secret", "token"})
+    def fn(secret: str, payload: dict[str, object]) -> str:
+        return "ok"
+
+    result = trace.run(fn, "top-secret", {"token": "abc", "safe": 1})
+    root = result.roots[0]
+    assert root.inputs["secret"] == "[redacted]"
+    assert root.inputs["payload"]["token"] == "[redacted]"
+    assert root.inputs["payload"]["safe"] == 1
+
+
+def test_trace_decorator_can_redact_output() -> None:
+    @trace(capture_output=False)
+    def fn() -> dict[str, str]:
+        return {"secret": "value"}
+
+    result = trace.run(fn)
+    assert result.return_value == {"secret": "value"}
+    assert result.roots[0].output == "[redacted]"
+
+
 def test_trace_run_exception_still_captures() -> None:
     @trace
     def crash() -> None:

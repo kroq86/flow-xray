@@ -28,6 +28,7 @@ import functools
 import inspect
 import json
 import time
+from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Lock
@@ -52,6 +53,28 @@ def _bind_args(fn: Callable, args: tuple, kwargs: dict) -> dict[str, Any]:
         return dict(bound.arguments)
     except Exception:
         return {"args": list(args), "kwargs": kwargs}
+
+
+def _mask_value(obj: Any, redacted_keys: set[str]) -> Any:
+    if isinstance(obj, Mapping):
+        return {
+            k: ("[redacted]" if isinstance(k, str) and k in redacted_keys else _mask_value(v, redacted_keys))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_mask_value(v, redacted_keys) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_mask_value(v, redacted_keys) for v in obj)
+    return obj
+
+
+def _redact_inputs(inputs: dict[str, Any], redacted_keys: set[str]) -> dict[str, Any]:
+    if not redacted_keys:
+        return inputs
+    return {
+        key: ("[redacted]" if key in redacted_keys else _mask_value(value, redacted_keys))
+        for key, value in inputs.items()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -290,18 +313,32 @@ class _Trace:
     ``trace.capture()`` — context manager for manual session.
     """
 
-    def __call__(self, fn: Callable) -> Callable:
+    def __call__(
+        self,
+        fn: Callable | None = None,
+        *,
+        redact: list[str] | tuple[str, ...] | set[str] | None = None,
+        capture_output: bool = True,
+    ) -> Callable:
+        if fn is None:
+            return lambda actual_fn: self(
+                actual_fn,
+                redact=redact,
+                capture_output=capture_output,
+            )
+        redacted_keys = {str(item) for item in (redact or ())}
+
         if inspect.iscoroutinefunction(fn):
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 session = _TraceSession.current()
                 if session is None:
                     return await fn(*args, **kwargs)
-                inputs = _bind_args(fn, args, kwargs)
+                inputs = _redact_inputs(_bind_args(fn, args, kwargs), redacted_keys)
                 node = session.enter_node(fn.__qualname__, inputs)
                 try:
                     result = await fn(*args, **kwargs)
-                    session.exit_node(node, result, None)
+                    session.exit_node(node, result if capture_output else "[redacted]", None)
                     return result
                 except Exception as e:
                     session.exit_node(node, None, f"{type(e).__name__}: {e}")
@@ -314,11 +351,11 @@ class _Trace:
                 session = _TraceSession.current()
                 if session is None:
                     return fn(*args, **kwargs)
-                inputs = _bind_args(fn, args, kwargs)
+                inputs = _redact_inputs(_bind_args(fn, args, kwargs), redacted_keys)
                 node = session.enter_node(fn.__qualname__, inputs)
                 try:
                     result = fn(*args, **kwargs)
-                    session.exit_node(node, result, None)
+                    session.exit_node(node, result if capture_output else "[redacted]", None)
                     return result
                 except Exception as e:
                     session.exit_node(node, None, f"{type(e).__name__}: {e}")

@@ -97,6 +97,10 @@ body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFo
 header{padding:10px 20px;background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:18px;flex-shrink:0}
 header h1{font-size:15px;font-weight:600}
 .st{font-size:13px;color:#8b949e}.st b{color:#c9d1d9}.st b.err{color:#f85149}
+.ctl{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.ctl input{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 8px;font-size:12px;min-width:170px}
+.ctl button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer}
+.ctl button:hover{background:#30363d}
 #main{display:flex;flex:1;overflow:hidden}
 #graph{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:20px}
 #graph svg{max-width:100%;height:auto;cursor:grab}
@@ -109,6 +113,7 @@ header h1{font-size:15px;font-weight:600}
 #graph .node{cursor:pointer}
 #graph .node:hover polygon{stroke:#58a6ff!important;stroke-width:2}
 #graph .selected polygon{stroke:#58a6ff!important;stroke-width:2.5}
+#graph .match polygon{stroke:#d29922!important;stroke-width:2.5}
 #graph .edge path{stroke:#30363d!important}
 #graph .edge polygon{fill:#30363d!important;stroke:#30363d!important}
 #graph text{fill:#fff!important}
@@ -124,6 +129,13 @@ header h1{font-size:15px;font-weight:600}
  <span class="st">Errors: <b id="se" class="err">-</b></span>
  <span class="st" id="stok" style="display:none">Tokens: <b id="stokv">-</b></span>
  <span class="st" id="scost" style="display:none">Cost: <b id="scostv" class="warn">-</b></span>
+ <div class="ctl">
+  <input id="search" type="search" placeholder="Search nodes">
+  <button id="zoomout" type="button">-</button>
+  <button id="zoomin" type="button">+</button>
+  <button id="zoomreset" type="button">Reset</button>
+  <button id="copydet" type="button">Copy details</button>
+ </div>
 </header>
 <div id="main">
  <div id="graph"><div id="hint">Rendering graph…</div></div>
@@ -161,7 +173,12 @@ function mkDot(){
 }
 
 const det=document.getElementById("det");
+const searchInput=document.getElementById("search");
+const copyButton=document.getElementById("copydet");
+let selectedNode=null;
+let zoomLevel=1;
 function showDet(n){
+  selectedNode=n||null;
   if(!n){det.innerHTML='<div id="hint">Click a node to inspect</div>';return}
   const st=n.error?`<span class="er">ERROR</span>`:`<span class="ok">OK</span>`;
   const ms=n.latency_ms.toFixed(2);
@@ -187,6 +204,45 @@ function showDet(n){
   det.innerHTML=h;
 }
 function esc(s){const d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function detailText(n){
+  if(!n)return "No node selected";
+  const parts=[`name: ${n.name}`, `latency_ms: ${n.latency_ms.toFixed(2)}`, `status: ${n.error ? "ERROR" : "OK"}`];
+  if(n.error)parts.push(`error: ${n.error}`);
+  parts.push(`inputs: ${JSON.stringify(n.inputs || {}, null, 2)}`);
+  if(n.output!=null)parts.push(`output: ${String(n.output)}`);
+  if(n.meta)parts.push(`meta: ${JSON.stringify(n.meta, null, 2)}`);
+  return parts.join("\n\n");
+}
+async function copyDetails(){
+  const text=detailText(selectedNode);
+  try{
+    await navigator.clipboard.writeText(text);
+    copyButton.textContent="Copied";
+    setTimeout(()=>{copyButton.textContent="Copy details"},1200);
+  }catch(_err){
+    copyButton.textContent="Copy failed";
+    setTimeout(()=>{copyButton.textContent="Copy details"},1200);
+  }
+}
+function updateZoom(){
+  const svg=document.querySelector('#graph svg');
+  if(!svg)return;
+  svg.style.transform=`scale(${zoomLevel})`;
+  svg.style.transformOrigin='center center';
+}
+function bindToolbar(){
+  document.getElementById("zoomin").addEventListener("click",()=>{zoomLevel=Math.min(zoomLevel+0.15,3);updateZoom()});
+  document.getElementById("zoomout").addEventListener("click",()=>{zoomLevel=Math.max(zoomLevel-0.15,0.4);updateZoom()});
+  document.getElementById("zoomreset").addEventListener("click",()=>{zoomLevel=1;updateZoom()});
+  copyButton.addEventListener("click",copyDetails);
+  searchInput.addEventListener("input",()=>{
+    const q=searchInput.value.trim().toLowerCase();
+    document.querySelectorAll('#graph .node').forEach(el=>{
+      const text=(el.textContent || '').toLowerCase();
+      el.classList.toggle('match', !!q && text.includes(q));
+    });
+  });
+}
 
 async function render(){
   const dot=mkDot();
@@ -206,10 +262,13 @@ async function render(){
         showDet(byId[nid]);
       });
     });
+    bindToolbar();
+    updateZoom();
   }catch(e){
     console.error(e);
     gc.innerHTML='<div id="hint" style="color:#f85149">WASM render failed, likely due to offline or blocked CDN access. DOT is shown below so the trace is still inspectable.</div>';
     const fb=document.getElementById("fb");fb.style.display="block";fb.textContent=dot;
+    bindToolbar();
   }
 }
 render();
