@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Refreshed the package README and PyPI long description with a clearer local-first value proposition.
+- Added stronger audience fit, main use case, CLI onboarding, safety/sharing guidance, and comparison/docs links.
+
 ## 0.3.0
 
 - Async tracing now uses task-local context, so concurrent coroutine branches keep the correct DAG shape.

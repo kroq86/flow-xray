@@ -35,4 +35,4 @@ __all__ = [
     "ir_to_json",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
