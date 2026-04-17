@@ -329,3 +329,22 @@ def test_trace_meta_keeps_zero_token_values() -> None:
     assert meta["prompt_tokens"] == 0
     assert meta["completion_tokens"] == 5
     assert meta["total_tokens"] == 5
+
+
+def test_trace_preview_normalizes_noisy_values() -> None:
+    @trace
+    def fn() -> dict[str, str]:
+        return {
+            "request_id": "123e4567-e89b-12d3-a456-426614174000",
+            "created_at": "2026-04-17T10:11:12Z",
+            "path": "/Users/example/workspace/project/file.txt",
+            "tmp": "/tmp/session/cache.json",
+        }
+
+    result = trace.run(fn)
+    node = result.to_dict()["nodes"][0]
+    output = node["output"]
+    assert "<uuid>" in output
+    assert "<timestamp>" in output
+    assert "<path:file.txt>" in output
+    assert "<tmp:cache.json>" in output

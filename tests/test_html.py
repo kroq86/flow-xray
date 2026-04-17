@@ -25,6 +25,7 @@ def test_trace_html_uses_flattened_total_latency() -> None:
     assert "offline or blocked CDN access" in viewer_html
     assert 'id="search"' in viewer_html
     assert 'id="copydet"' in viewer_html
+    assert 'id="zoomfit"' in viewer_html
     assert 'id="mode-overview"' in viewer_html
     assert 'id="mode-timeline"' in viewer_html
     assert 'id="mode-raw"' in viewer_html
@@ -33,6 +34,9 @@ def test_trace_html_uses_flattened_total_latency() -> None:
     assert "renderOverview()" in viewer_html
     assert "renderTimeline()" in viewer_html
     assert "renderRaw()" in viewer_html
+    assert "fitGraph()" in viewer_html
+    assert "syncSelection(" in viewer_html
+    assert "selectNode(" in viewer_html
     assert "Raw Node JSON" in viewer_html
     assert "bindToolbar()" in viewer_html
     assert "navigator.clipboard.writeText" in viewer_html

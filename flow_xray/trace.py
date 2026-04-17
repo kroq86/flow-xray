@@ -27,6 +27,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import re
 import time
 from collections.abc import Mapping
 from contextvars import ContextVar
@@ -35,11 +36,26 @@ from threading import Lock
 from typing import Any, Callable
 
 
+_UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", re.IGNORECASE)
+_ISO_TS_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b")
+_USER_PATH_RE = re.compile(r"/Users/[^/\s]+(?:/[^\s\"']+)+")
+_TMP_PATH_RE = re.compile(r"/tmp(?:/[^\s\"']+)+")
+
+
+def _normalize_preview_text(text: str) -> str:
+    text = _UUID_RE.sub("<uuid>", text)
+    text = _ISO_TS_RE.sub("<timestamp>", text)
+    text = _USER_PATH_RE.sub(lambda m: f"<path:{m.group(0).rsplit('/', 1)[-1]}>", text)
+    text = _TMP_PATH_RE.sub(lambda m: f"<tmp:{m.group(0).rsplit('/', 1)[-1]}>", text)
+    return text
+
+
 def _safe_repr(obj: Any, max_len: int = 800) -> str:
     try:
         s = json.dumps(obj, default=str, ensure_ascii=False)
     except Exception:
         s = repr(obj)
+    s = _normalize_preview_text(s)
     if len(s) > max_len:
         s = s[: max_len - 1] + "\u2026"
     return s

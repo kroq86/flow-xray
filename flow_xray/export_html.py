@@ -127,6 +127,7 @@ header h1{font-size:15px;font-weight:600}
 .timeline{display:flex;flex-direction:column;gap:10px}
 .timeline-item{border:1px solid #30363d;border-radius:8px;background:#161b22;padding:10px;cursor:pointer}
 .timeline-item.match{border-color:#d29922}
+.timeline-item.selected{border-color:#58a6ff;box-shadow:0 0 0 1px #58a6ff inset}
 .timeline-item .kind{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e}
 .timeline-item .summary{margin-top:4px}
 #rawview{padding:18px}
@@ -166,6 +167,7 @@ header h1{font-size:15px;font-weight:600}
   <input id="search" type="search" placeholder="Search/filter">
   <button id="zoomout" type="button">-</button>
   <button id="zoomin" type="button">+</button>
+  <button id="zoomfit" type="button">Fit</button>
   <button id="zoomreset" type="button">Reset</button>
   <button id="copydet" type="button">Copy details</button>
  </div>
@@ -335,8 +337,9 @@ function renderTimeline(query=""){
     </div>`).join("") || '<div id="hint">No timeline items match the current filter.</div>';
   document.getElementById("timeline").innerHTML=items;
   document.querySelectorAll('.timeline-item[data-node-id]').forEach(el=>{
-    el.addEventListener('click',()=>showDet(byId[el.getAttribute('data-node-id')]));
+    el.addEventListener('click',()=>selectNode(el.getAttribute('data-node-id')));
   });
+  if(selectedNode)syncSelection(selectedNode.id);
 }
 
 const rawtrace=document.getElementById("rawtrace");
@@ -356,6 +359,7 @@ const searchInput=document.getElementById("search");
 const copyButton=document.getElementById("copydet");
 let selectedNode=null;
 let zoomLevel=1;
+let graphContainer=null;
 
 function detailText(n){
   if(!n)return "No node selected";
@@ -407,6 +411,26 @@ function showDet(n){
   det.innerHTML=h;
 }
 
+function syncSelection(nodeId){
+  document.querySelectorAll('#graphwrap .selected').forEach(el=>el.classList.remove('selected'));
+  document.querySelectorAll('.timeline-item.selected').forEach(el=>el.classList.remove('selected'));
+  if(!nodeId)return;
+  const graphNode=document.querySelector(`#graphwrap .node[data-node-id="${nodeId}"]`);
+  if(graphNode)graphNode.classList.add('selected');
+  const timelineNode=document.querySelector(`.timeline-item[data-node-id="${nodeId}"]`);
+  if(timelineNode){
+    timelineNode.classList.add('selected');
+    timelineNode.scrollIntoView({block:"nearest"});
+  }
+}
+
+function selectNode(nodeId){
+  const node=byId[nodeId];
+  if(!node)return;
+  showDet(node);
+  syncSelection(nodeId);
+}
+
 async function copyDetails(){
   const text=detailText(selectedNode);
   try{
@@ -435,6 +459,19 @@ function updateZoom(){
   svg.style.transformOrigin='center center';
 }
 
+function fitGraph(){
+  const svg=document.querySelector('#graphwrap svg');
+  const host=graphContainer || document.getElementById("graphwrap");
+  if(!svg || !host)return;
+  const svgWidth=parseFloat(svg.getAttribute('width') || "0") || svg.getBBox().width || svg.clientWidth;
+  const svgHeight=parseFloat(svg.getAttribute('height') || "0") || svg.getBBox().height || svg.clientHeight;
+  if(!svgWidth || !svgHeight)return;
+  const availW=Math.max(host.clientWidth - 40, 120);
+  const availH=Math.max(host.clientHeight - 40, 120);
+  zoomLevel=Math.max(0.2, Math.min(2.5, Math.min(availW / svgWidth, availH / svgHeight)));
+  updateZoom();
+}
+
 function applySearch(){
   const q=searchInput.value.trim().toLowerCase();
   document.querySelectorAll('#graphwrap .node').forEach(el=>{
@@ -443,6 +480,7 @@ function applySearch(){
   });
   renderTimeline(q);
   renderRaw(q || rawfilter.value);
+  if(selectedNode)syncSelection(selectedNode.id);
 }
 
 function setMode(mode){
@@ -453,6 +491,7 @@ function setMode(mode){
 function bindToolbar(){
   document.getElementById("zoomin").addEventListener("click",()=>{zoomLevel=Math.min(zoomLevel+0.15,3);updateZoom()});
   document.getElementById("zoomout").addEventListener("click",()=>{zoomLevel=Math.max(zoomLevel-0.15,0.4);updateZoom()});
+  document.getElementById("zoomfit").addEventListener("click",fitGraph);
   document.getElementById("zoomreset").addEventListener("click",()=>{zoomLevel=1;updateZoom()});
   copyButton.addEventListener("click",copyDetails);
   document.getElementById("copyraw").addEventListener("click",copyRaw);
@@ -464,6 +503,7 @@ function bindToolbar(){
 async function renderGraph(){
   const dot=mkDot();
   const gc=document.getElementById("graphwrap");
+  graphContainer=gc;
   try{
     const {Graphviz}=await import("https://cdn.jsdelivr.net/npm/@hpcc-js/wasm-graphviz@1.6.1/+esm");
     const gv=await Graphviz.load();
@@ -473,12 +513,12 @@ async function renderGraph(){
       const title=el.querySelector('title');
       if(!title)return;
       const nid=title.textContent.trim();
+      el.setAttribute('data-node-id', nid);
       el.addEventListener('click',()=>{
-        gc.querySelectorAll('.selected').forEach(s=>s.classList.remove('selected'));
-        el.classList.add('selected');
-        showDet(byId[nid]);
+        selectNode(nid);
       });
     });
+    zoomLevel=1;
     updateZoom();
     applySearch();
   }catch(e){
