@@ -25,22 +25,28 @@
 
 **Overview:** [kroq86.github.io/loom-stack](https://kroq86.github.io/loom-stack/) — packages, flow, audience, quick start.
 
-Three composable packages for **long-running async agent loops**. Each does one job; compose them as needed.
+The stack is a pyramid, not five equal frameworks. Tail-call optimization is
+the primitive, runner is the durable runtime, xray is the microscope, and the
+apps prove the stack in real workflows.
 
-| Package | Install | Job |
+| Layer | Project | Job |
 | --- | --- | --- |
-| **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** | `pip install loom-tailcalls` | Write stack-safe transition loops (`@tailrec`, `@tailstream`) |
-| **[flow-xray](https://github.com/kroq86/flow-xray)** ← **this repo** | `pip install flow-xray` | Export local HTML traces (LLM/tool calls, branches, errors) |
-| **[loom-runner](https://github.com/kroq86/loom-runner)** | `pip install loom-runner` | Checkpoint/resume in SQLite; CLI inspect (`explain`, `history`, …) |
-| **[loom-run](https://github.com/kroq86/loom-run)** | `pip install "loom-run[api]"` | **Dev showcase** — chat agent; <code>--trace trace.html</code> |
-| **[loom-ops](https://github.com/kroq86/loom-ops)** | `pip install "loom-ops[api]"` | **Ops product** — runbooks; <code>--trace trace.html</code> |
+| Primitive | **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** | Make async recursive/state-machine loops stack-safe |
+| Runtime kernel | **[loom-runner](https://github.com/kroq86/loom-runner)** | Make those loops durable, resumable, idempotent |
+| Microscope | **[flow-xray](https://github.com/kroq86/flow-xray)** ← **this repo** | Show what actually happened in one offline HTML trace |
+| Proof app | **[loom-run](https://github.com/kroq86/loom-run)** | Chat agent reference implementation |
+| Proof app | **[loom-ops](https://github.com/kroq86/loom-ops)** | Ops/runbook agent reference implementation |
 
 ```text
 @tailrec agent loop  →  loom-runner run/resume  →  --trace trace.html
      (shape)                  (durability)              (flow-xray)
 ```
 
-**This repo** traces Python call graphs into one local HTML file. Use standalone with `@trace`, or via `loom-runner --trace` / **[loom-run](https://github.com/kroq86/loom-run)** / **[loom-ops](https://github.com/kroq86/loom-ops)** `--trace` — no cloud account required. **Ecosystem:** [ECOSYSTEM.md](https://github.com/kroq86/loom-stack/blob/main/docs/ECOSYSTEM.md)
+**This repo is the microscope.** It does not provide durability or agent
+orchestration; it shows what actually happened. Use standalone with `@trace`,
+or via `loom-runner --trace` / **[loom-run](https://github.com/kroq86/loom-run)** /
+**[loom-ops](https://github.com/kroq86/loom-ops)** `--trace` — no cloud account
+required. **Ecosystem:** [ECOSYSTEM.md](https://github.com/kroq86/loom-stack/blob/main/docs/ECOSYSTEM.md)
 
 ---
 
