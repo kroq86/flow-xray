@@ -15,6 +15,18 @@
 
 ---
 
+## Loom stack
+
+Small composable pieces for long-running agent loops:
+
+| Package | Role |
+| --- | --- |
+| **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** | Stack-safe async transitions |
+| **[flow-xray](https://github.com/kroq86/flow-xray)** (this repo) | Local HTML traces |
+| **[loom-runner](https://github.com/kroq86/loom-runner)** | SQLite checkpoint/resume; `--trace` emits flow-xray HTML |
+
+---
+
 ```python
 from flow_xray import trace
 
