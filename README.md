@@ -15,7 +15,8 @@
 </p>
 
 <p align="center">
-  <b>Part of the <a href="https://kroq86.github.io/loom-stack/">Loom stack</a></b> — local HTML traces for long-running agent loops.
+  <b>Part of the <a href="https://kroq86.github.io/loom-stack/">Loom stack</a></b> — local HTML traces for long-running agent loops.<br>
+  <b>Official showcase:</b> <a href="https://github.com/kroq86/loom-run">loom-run</a> (uses <code>--trace</code> from loom-runner and standalone <code>@trace</code>).
 </p>
 
 ---
@@ -31,13 +32,14 @@ Three composable packages for **long-running async agent loops**. Each does one 
 | **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** | `pip install loom-tailcalls` | Write stack-safe transition loops (`@tailrec`, `@tailstream`) |
 | **[flow-xray](https://github.com/kroq86/flow-xray)** ← **this repo** | `pip install flow-xray` | Export local HTML traces (LLM/tool calls, branches, errors) |
 | **[loom-runner](https://github.com/kroq86/loom-runner)** | `pip install loom-runner` | Checkpoint/resume in SQLite; CLI inspect (`explain`, `history`, …) |
+| **[loom-run](https://github.com/kroq86/loom-run)** | `pip install -e .` (from source) | **Official showcase** — chat agent + supervisor; <code>--trace trace.html</code> |
 
 ```text
 @tailrec agent loop  →  loom-runner run/resume  →  --trace trace.html
      (shape)                  (durability)              (flow-xray)
 ```
 
-**This repo** traces Python call graphs into one local HTML file. Use standalone with `@trace`, or via `loom-runner --trace` on checkpointed agent runs — no cloud account required.
+**This repo** traces Python call graphs into one local HTML file. Use standalone with `@trace`, or via `loom-runner --trace` / **[loom-run](https://github.com/kroq86/loom-run)** `--trace` on checkpointed agent runs — no cloud account required.
 
 ---
 
