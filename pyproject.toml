@@ -32,7 +32,8 @@ dev = ["pytest>=7"]
 Homepage = "https://github.com/kroq86/flow-xray"
 Repository = "https://github.com/kroq86/flow-xray"
 Issues = "https://github.com/kroq86/flow-xray/issues"
-"Loom stack" = "https://github.com/kroq86/loom-tailcalls#loom-stack"
+"Loom stack" = "https://kroq86.github.io/loom-stack/"
+Documentation = "https://kroq86.github.io/loom-stack/"
 
 [project.scripts]
 flow-xray = "flow_xray.cli:main"

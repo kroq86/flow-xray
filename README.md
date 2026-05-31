@@ -11,11 +11,18 @@
   <a href="https://pypi.org/project/flow-xray/"><img src="https://img.shields.io/pypi/v/flow-xray?color=blue&cacheSeconds=60" alt="PyPI"></a>
   <a href="https://github.com/kroq86/flow-xray/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python">
+  <a href="https://kroq86.github.io/loom-stack/"><img src="https://img.shields.io/badge/docs-loom--stack-8B7355" alt="Loom stack"></a>
+</p>
+
+<p align="center">
+  <b>Part of the <a href="https://kroq86.github.io/loom-stack/">Loom stack</a></b> — local HTML traces for long-running agent loops.
 </p>
 
 ---
 
 ## Loom stack
+
+**Overview:** [kroq86.github.io/loom-stack](https://kroq86.github.io/loom-stack/) — packages, flow, audience, quick start.
 
 Three composable packages for **long-running async agent loops**. Each does one job; compose them as needed.
 
