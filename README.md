@@ -17,13 +17,20 @@
 
 ## Loom stack
 
-Small composable pieces for long-running agent loops:
+Three composable packages for **long-running async agent loops**. Each does one job; compose them as needed.
 
-| Package | Role |
-| --- | --- |
-| **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** | Stack-safe async transitions |
-| **[flow-xray](https://github.com/kroq86/flow-xray)** (this repo) | Local HTML traces |
-| **[loom-runner](https://github.com/kroq86/loom-runner)** | SQLite checkpoint/resume; `--trace` emits flow-xray HTML |
+| Package | Install | Job |
+| --- | --- | --- |
+| **[loom-tailcalls](https://github.com/kroq86/loom-tailcalls)** | `pip install loom-tailcalls` | Write stack-safe transition loops (`@tailrec`, `@tailstream`) |
+| **[flow-xray](https://github.com/kroq86/flow-xray)** ← **this repo** | `pip install flow-xray` | Export local HTML traces (LLM/tool calls, branches, errors) |
+| **[loom-runner](https://github.com/kroq86/loom-runner)** | `pip install loom-runner` | Checkpoint/resume in SQLite; CLI inspect (`explain`, `history`, …) |
+
+```text
+@tailrec agent loop  →  loom-runner run/resume  →  --trace trace.html
+     (shape)                  (durability)              (flow-xray)
+```
+
+**This repo** traces Python call graphs into one local HTML file. Use standalone with `@trace`, or via `loom-runner --trace` on checkpointed agent runs — no cloud account required.
 
 ---
 
