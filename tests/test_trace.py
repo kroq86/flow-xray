@@ -188,6 +188,39 @@ def test_trace_async_nested_calls() -> None:
     assert root.children[0].output == 5
 
 
+def test_trace_arun_async_nested_calls() -> None:
+    @trace
+    async def child(x: int) -> int:
+        await asyncio.sleep(0)
+        return x + 1
+
+    @trace
+    async def parent(x: int) -> int:
+        return await child(x)
+
+    result = asyncio.run(trace.arun(parent, 4))
+    root = result.roots[0]
+    assert result.return_value == 5
+    assert root.name.endswith("<locals>.parent")
+    assert len(root.children) == 1
+    assert root.children[0].name.endswith("<locals>.child")
+    assert root.children[0].output == 5
+
+
+def test_trace_arun_can_reraise_exceptions() -> None:
+    @trace
+    async def crash() -> None:
+        await asyncio.sleep(0)
+        raise RuntimeError("oops")
+
+    try:
+        asyncio.run(trace.arun(crash, raise_exceptions=True))
+    except RuntimeError as exc:
+        assert str(exc) == "oops"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
 def test_trace_async_gather_keeps_sibling_structure() -> None:
     @trace
     async def child(label: str, delay: float) -> str:

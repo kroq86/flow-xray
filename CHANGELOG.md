@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.5
+
+- Added `await trace.arun(...)` for native async trace sessions without nesting `asyncio.run(...)` inside an existing event loop.
+- Updated async docs to use `trace.arun(...)` as the default async entrypoint.
+
 ## 0.3.3
 
 **Viewer UX**

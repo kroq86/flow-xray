@@ -341,7 +341,8 @@ class _Trace:
     Decorator + runner.
 
     ``@trace`` — mark functions for capture.
-    ``trace.run(fn, ...)`` — execute with capture, return ``TraceResult``.
+    ``trace.run(fn, ...)`` — execute sync code with capture, return ``TraceResult``.
+    ``await trace.arun(fn, ...)`` — execute async code with capture, return ``TraceResult``.
     ``trace.capture()`` — context manager for manual session.
     """
 
@@ -411,6 +412,28 @@ class _Trace:
         with session:
             try:
                 rv = fn(*args, **kwargs)
+            except Exception as exc:
+                err = exc
+        if err is not None and raise_exceptions:
+            raise err
+        return TraceResult(session.roots, return_value=rv, error=err, t0=session._session_start_ms)
+
+    async def arun(
+        self,
+        fn: Callable,
+        *args: Any,
+        raise_exceptions: bool = False,
+        **kwargs: Any,
+    ) -> TraceResult:
+        """Await *fn* inside a fresh trace session, return ``TraceResult``."""
+        session = _TraceSession()
+        rv: Any = None
+        err: BaseException | None = None
+        with session:
+            try:
+                rv = fn(*args, **kwargs)
+                if inspect.isawaitable(rv):
+                    rv = await rv
             except Exception as exc:
                 err = exc
         if err is not None and raise_exceptions:

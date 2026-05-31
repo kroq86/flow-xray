@@ -237,11 +237,12 @@ if __name__ == "__main__":
 
 ### Async support
 
-`@trace` works with `async def` out of the box — no extra config:
+`@trace` works with `async def` out of the box. Use `trace.arun(...)`
+when you are already in async code:
 
 ```python
-from flow_xray import trace
 import asyncio
+from flow_xray import trace
 
 @trace
 async def call_api(query):
@@ -253,7 +254,7 @@ async def agent(query):
     result = await call_api(query)
     return result["answer"]
 
-result = trace.run(lambda: asyncio.run(agent("hello")))
+result = await trace.arun(agent, "hello")
 result.to_html("async_trace.html")
 ```
 
