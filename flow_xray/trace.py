@@ -229,11 +229,11 @@ class TraceResult:
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
-    def to_html(self, path: str, *, title: str = "flow-xray trace") -> None:
+    def to_html(self, path: str, *, title: str = "flow-xray trace", static_index: Any | None = None) -> None:
         from flow_xray.export_html import trace_to_standalone_html
         from pathlib import Path
         Path(path).write_text(
-            trace_to_standalone_html(self, title=title), encoding="utf-8",
+            trace_to_standalone_html(self, title=title, static_index=static_index), encoding="utf-8",
         )
 
     def to_dot(self) -> str:

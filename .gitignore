@@ -15,3 +15,4 @@ build/
 agent_trace.html
 forward.html
 backward.html
+examples/static_context_demo.html

@@ -194,18 +194,43 @@ summary{{cursor:pointer;font-size:13px;color:#8b949e}}
 # Execution-trace viewer (dark theme, interactive)
 # ---------------------------------------------------------------------------
 
+def _static_payload(index: object) -> dict:
+    """Minimal wire format for the embedded viewer: names + (caller, callee)
+    pairs. Callers/callees/blast-radius are recomputed client-side from this
+    — the dataset is small enough that shipping ``StaticIndex``'s query
+    methods again in JS is simpler than a second serialization format."""
+    return {
+        "functions": sorted(index.functions),  # type: ignore[attr-defined]
+        "edges": sorted(index.calls),  # type: ignore[attr-defined]
+    }
+
+
 def trace_to_standalone_html(
     trace_result: object,
     *,
     title: str = "flow-xray trace",
+    static_index: object | None = None,
 ) -> str:
     """
     Return a self-contained HTML document that renders a ``TraceResult``
     as an interactive execution DAG (dark theme, Graphviz WASM, click-to-inspect).
+
+    If *static_index* (a ``StaticIndex``) is given, the graph view gains a
+    "Show static context" toggle: statically-reachable-but-not-executed
+    functions render as dashed ghost nodes, and clicking any node shows its
+    static callers/callees/blast-radius alongside the runtime detail panel.
     """
     trace_json = json.dumps(trace_result.to_dict(), ensure_ascii=False)  # type: ignore[union-attr]
+    static_json = json.dumps(
+        _static_payload(static_index) if static_index is not None else None, ensure_ascii=False,
+    )
     safe_title = html.escape(title, quote=True)
-    return _TRACE_HTML_TEMPLATE.replace("__TITLE__", safe_title).replace("__TRACE_JSON__", trace_json)
+    return (
+        _TRACE_HTML_TEMPLATE
+        .replace("__TITLE__", safe_title)
+        .replace("__TRACE_JSON__", trace_json)
+        .replace("__STATIC_JSON__", static_json)
+    )
 
 
 _TRACE_HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -226,6 +251,7 @@ header h1{font-size:15px;font-weight:600}
 .ctl button:hover,.modebtn:hover,.subctl button:hover{background:#30363d}
 .modebar{padding:10px 20px;background:#0f141b;border-bottom:1px solid #30363d;display:flex;gap:8px;flex-wrap:wrap}
 .modebtn.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
+#togglestatic.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
 #main{display:flex;flex:1;overflow:hidden}
 #content{flex:1;overflow:hidden;display:flex;flex-direction:column}
 .view{display:none;flex:1;overflow:auto}
@@ -317,6 +343,7 @@ header h1{font-size:15px;font-weight:600}
  <span class="st" id="scost" style="display:none">Cost: <b id="scostv" class="warn">-</b></span>
  <div class="ctl">
   <input id="search" type="search" placeholder="Search/filter">
+  <button id="togglestatic" type="button" style="display:none">Show static context</button>
   <button id="zoomout" type="button">-</button>
   <button id="zoomin" type="button">+</button>
   <button id="zoomfit" type="button">Fit</button>
@@ -350,6 +377,26 @@ header h1{font-size:15px;font-weight:600}
 </div>
 <script type="module">
 const TRACE=__TRACE_JSON__;
+const STATIC=__STATIC_JSON__;
+const STATIC_FUNCS=STATIC?new Set(STATIC.functions):new Set();
+let showStatic=false;
+let ghostNameById={};
+// Callees are filtered to known definitions — an unresolved bare name from
+// dynamic dispatch (getattr, a callback parameter) isn't a real function.
+// Callers aren't filtered: a caller is always either "<module>" or a real
+// qualname, per how the indexer builds edges, never a bare unresolved name.
+function staticCallees(name){return STATIC?[...new Set(STATIC.edges.filter(([c,b])=>c===name&&STATIC_FUNCS.has(b)).map(([,b])=>b))].sort():[]}
+function staticCallers(name){return STATIC?[...new Set(STATIC.edges.filter(([,b])=>b===name).map(([c])=>c))].sort():[]}
+function blastRadius(name){
+  if(!STATIC)return[];
+  const seen=new Set();const frontier=[name];
+  while(frontier.length){
+    const cur=frontier.pop();
+    for(const c of staticCallers(cur)){if(!seen.has(c)){seen.add(c);frontier.push(c)}}
+  }
+  seen.delete(name);
+  return[...seen].sort();
+}
 function flat(roots,pid=null,depth=0,acc=[]){
   (roots||[]).forEach((n,index)=>{
     const entry={...n,pid,depth,order:acc.length,root_index:depth===0?index:null};
@@ -413,6 +460,7 @@ if(totals.tokens){document.getElementById("stok").style.display="";document.getE
 if(totals.cost){document.getElementById("scost").style.display="";document.getElementById("scostv").textContent="$"+totals.cost.toFixed(6)}
 
 function mkDot(){
+  ghostNameById={};
   let d='digraph G {\n  rankdir="TB";\n  bgcolor="transparent";\n';
   d+='  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.3,0.15"];\n';
   d+='  edge [color="#30363d",arrowsize=0.7];\n';
@@ -422,7 +470,42 @@ function mkDot(){
     if(n.meta&&n.meta.total_tokens!=null)lb+="\\n"+n.meta.total_tokens+" tok";
     d+=`  ${n.id} [label="${lb}",fillcolor="${c}",fontcolor="white",tooltip="${n.id}"];\n`;
   }
-  for(const n of nodes){if(n.pid)d+=`  ${n.pid} -> ${n.id};\n`}
+  const useStatic=showStatic&&STATIC;
+  for(const n of nodes){
+    if(!n.pid)continue;
+    if(useStatic && !STATIC.edges.some(([c,b])=>c===byId[n.pid].name&&b===n.name)){
+      // executed, but the ast pass never saw this call (dynamic dispatch, decorator, etc.)
+      d+=`  ${n.pid} -> ${n.id} [color="#d29922",tooltip="runtime-only"];\n`;
+    }else{
+      d+=`  ${n.pid} -> ${n.id};\n`;
+    }
+  }
+  if(useStatic){
+    // Collapse per-invocation trace nodes down to one representative
+    // instance per function name, since static edges are name-to-name, not
+    // call-instance-to-call-instance.
+    const firstInstanceByName=new Map();
+    for(const n of nodes)if(!firstInstanceByName.has(n.name))firstInstanceByName.set(n.name,n.id);
+    const executedPairs=new Set(nodes.filter(n=>n.pid).map(n=>byId[n.pid].name+" "+n.name));
+    function refFor(name){
+      if(firstInstanceByName.has(name))return firstInstanceByName.get(name);
+      for(const[gid,gname]of Object.entries(ghostNameById))if(gname===name)return gid;
+      const gid="ghost_"+Object.keys(ghostNameById).length;
+      ghostNameById[gid]=name;
+      return gid;
+    }
+    for(const[caller,callee]of STATIC.edges){
+      if(executedPairs.has(caller+" "+callee))continue; // already drawn above as a solid/confirmed edge
+      // Only known definitions become ghosts — an unresolved bare name
+      // (dynamic dispatch, a builtin, a parameter passed as a callback)
+      // isn't a "function that could have run", just an ast dead end.
+      if(!STATIC_FUNCS.has(callee))continue;
+      d+=`  ${refFor(caller)} -> ${refFor(callee)} [style="dashed",color="#8b949e",arrowsize=0.6,tooltip="static-only"];\n`;
+    }
+    for(const[gid,gname]of Object.entries(ghostNameById)){
+      d+=`  ${gid} [label="${gname}\\n(not executed)",style="rounded,dashed",color="#8b949e",fontcolor="#8b949e",fillcolor="#161b22",tooltip="${gid}"];\n`;
+    }
+  }
   d+='}';return d;
 }
 
@@ -676,6 +759,7 @@ function showDet(n){
     if(toks.length)h+=`<div class="ds"><div class="dl">Tokens</div><div class="dv">${esc(toks.join("  ·  "))}</div></div>`;
     if(m.estimated_cost_usd!=null)h+=`<div class="ds"><div class="dl">Est. cost</div><div class="dv warn">$${m.estimated_cost_usd.toFixed(6)}</div></div>`;
   }
+  if(STATIC)h+=staticContextBlock(n.name);
   h+=`<div class="ds"><div class="dl">Raw Node JSON</div>${dvBlock(JSON.stringify(n,null,2))}</div>`;
   det.innerHTML=h;
   det.querySelectorAll('.xbtn[data-xid]').forEach(b=>{
@@ -707,12 +791,32 @@ function syncGanttSelection(nodeId){
 }
 
 function selectNode(nodeId){
+  if(typeof nodeId==="string"&&nodeId in ghostNameById){
+    showGhostDet(ghostNameById[nodeId]);
+    syncSelection(nodeId);
+    return;
+  }
   const node=byId[nodeId];
   if(!node)return;
   showDet(node);
   syncSelection(nodeId);
   syncOverviewSelection(nodeId);
   syncGanttSelection(nodeId);
+}
+
+function staticContextBlock(name){
+  const list=arr=>arr.length?arr.map(esc).join(", "):"(none)";
+  return `<div class="ds"><div class="dl">Static callers</div><div class="dv">${list(staticCallers(name))}</div></div>`+
+         `<div class="ds"><div class="dl">Static callees</div><div class="dv">${list(staticCallees(name))}</div></div>`+
+         `<div class="ds"><div class="dl">Blast radius (static)</div><div class="dv">${list(blastRadius(name))}</div></div>`;
+}
+
+function showGhostDet(name){
+  selectedNode=null;
+  let h=`<div class="dt">${esc(name)}</div>`;
+  h+=`<div class="ds"><div class="dl">Status</div><div class="dv warn">reachable-but-not-executed — statically possible, not seen in this run</div></div>`;
+  h+=staticContextBlock(name);
+  det.innerHTML=h;
 }
 
 async function copyDetails(){
@@ -782,6 +886,16 @@ function bindToolbar(){
   searchInput.addEventListener("input",applySearch);
   rawfilter.addEventListener("input",()=>renderRaw(rawfilter.value || searchInput.value));
   document.querySelectorAll('.modebtn').forEach(btn=>btn.addEventListener('click',()=>setMode(btn.dataset.mode)));
+  const toggleBtn=document.getElementById("togglestatic");
+  if(STATIC){
+    toggleBtn.style.display="";
+    toggleBtn.addEventListener("click",()=>{
+      showStatic=!showStatic;
+      toggleBtn.classList.toggle("active",showStatic);
+      toggleBtn.textContent=showStatic?"Hide static context":"Show static context";
+      renderGraph();
+    });
+  }
 }
 
 async function renderGraph(){

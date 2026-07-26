@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6
+
+**Static context — possible vs actual execution**
+- `flow_xray.static_index.build_index(paths)` — indexes Python source via `ast` (no execution) into a call graph keyed by `__qualname__`, with `callers`, `callees`, `blast_radius`, and `unused` queries (same query shape as callers/callees/blast-radius tools for other languages, rebuilt for Python).
+- `flow_xray.merge.merge_trace_with_static(trace_result, static_index)` — combines a runtime trace with a static call graph by name; classifies every edge as `both` / `runtime-only` / `static-only` and every node as `executed` / `reachable-but-not-executed`.
+- `TraceResult.to_html(..., static_index=...)` — the graph view gains a **"Show static context"** toggle: statically-reachable-but-not-executed functions render as dashed ghost nodes, edges the static pass couldn't confirm (dynamic dispatch, decorators) are marked runtime-only, and clicking any node shows its static callers/callees/blast-radius alongside the usual runtime detail panel.
+- New example: `examples/static_context_demo.py` — a small tool-router agent demonstrating the difference: a database call that fails, an untaken `call_search`/`fallback` branch shown as ghost context, and a dynamically-dispatched call honestly marked runtime-only.
+
 ## 0.3.5
 
 - Added `await trace.arun(...)` for native async trace sessions without nesting `asyncio.run(...)` inside an existing event loop.

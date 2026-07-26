@@ -21,6 +21,29 @@
 
 ---
 
+## New: static context — possible vs actual execution
+
+`flow-xray` now shows not just what happened in a run, but the nearby paths the source code allowed.
+
+```python
+from flow_xray import trace
+from flow_xray.static_index import build_index
+
+result = trace.run(agent, query)
+index = build_index([__file__])
+result.to_html("trace.html", static_index=index)
+```
+
+Open `trace.html` and click **"Show static context"** in the Graph view:
+
+- untaken branches (e.g. a tool that was never selected this run) render as dashed **ghost nodes**
+- calls the static pass couldn't see — dynamic dispatch, decorators, monkey-patching — are marked **runtime-only**, not silently dropped
+- click any node to see its **static callers, static callees, and blast radius** next to the usual runtime detail panel
+
+This answers questions a plain runtime trace can't: *was this the only branch that could have run, and what depends on the function that just broke?* See `examples/static_context_demo.py` for a runnable scenario with a failing branch, an untaken alternative, and a dynamic call.
+
+---
+
 ## Loom stack
 
 **Overview:** [kroq86.github.io/loom-stack](https://kroq86.github.io/loom-stack/) — packages, flow, audience, quick start.
