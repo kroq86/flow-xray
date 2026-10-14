@@ -27,6 +27,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import os
 import re
 import time
 from collections.abc import Mapping
@@ -50,7 +51,15 @@ def _normalize_preview_text(text: str) -> str:
     return text
 
 
-def _safe_repr(obj: Any, max_len: int = 800) -> str:
+# Longest recorded value (inputs/outputs) before it is cut with "…".
+# Agent traces need full prompts and tool results; set it with
+# trace.configure(max_value_chars=...) or FLOW_XRAY_MAX_VALUE_CHARS.
+_settings: dict[str, Any] = {"max_value_chars": int(os.getenv("FLOW_XRAY_MAX_VALUE_CHARS", "800"))}
+
+
+def _safe_repr(obj: Any, max_len: int | None = None) -> str:
+    if max_len is None:
+        max_len = _settings["max_value_chars"]
     try:
         s = json.dumps(obj, default=str, ensure_ascii=False)
     except Exception:
@@ -82,6 +91,22 @@ def _mask_value(obj: Any, redacted_keys: set[str]) -> Any:
     if isinstance(obj, tuple):
         return tuple(_mask_value(v, redacted_keys) for v in obj)
     return obj
+
+
+def _snapshot(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Copy of the call's arguments AS THEY WERE AT CALL TIME.
+
+    Arguments used to be kept by reference and serialized at export, so a
+    list the caller kept appending to (an agent's ``messages``) showed its
+    final contents on every call that received it -- every model call in a
+    run looked identical. A JSON round-trip (the same conversion the export
+    applies) freezes the values now; anything not JSON-serializable becomes
+    its ``str()``, as before.
+    """
+    try:
+        return json.loads(json.dumps(inputs, default=str, ensure_ascii=False))
+    except Exception:
+        return {k: repr(v) for k, v in inputs.items()}
 
 
 def _redact_inputs(inputs: dict[str, Any], redacted_keys: set[str]) -> dict[str, Any]:
@@ -369,7 +394,7 @@ class _Trace:
                 session = _TraceSession.current()
                 if session is None:
                     return await fn(*args, **kwargs)
-                inputs = _redact_inputs(_bind_args(fn, args, kwargs), redacted_keys)
+                inputs = _snapshot(_redact_inputs(_bind_args(fn, args, kwargs), redacted_keys))
                 node = session.enter_node(fn.__qualname__, inputs, kind=kind)
                 try:
                     result = await fn(*args, **kwargs)
@@ -386,7 +411,7 @@ class _Trace:
                 session = _TraceSession.current()
                 if session is None:
                     return fn(*args, **kwargs)
-                inputs = _redact_inputs(_bind_args(fn, args, kwargs), redacted_keys)
+                inputs = _snapshot(_redact_inputs(_bind_args(fn, args, kwargs), redacted_keys))
                 node = session.enter_node(fn.__qualname__, inputs, kind=kind)
                 try:
                     result = fn(*args, **kwargs)
@@ -445,6 +470,24 @@ class _Trace:
         return _TraceSession()
 
     @staticmethod
+    def configure(*, max_value_chars: int | None = None) -> None:
+        """Process-wide settings.
+
+        ``max_value_chars`` — longest recorded input/output value before it is
+        truncated (default 800, or ``FLOW_XRAY_MAX_VALUE_CHARS``). Raise it to
+        keep full prompts and tool results in agent traces.
+        """
+        if max_value_chars is not None:
+            if max_value_chars < 1:
+                raise ValueError("max_value_chars must be positive")
+            _settings["max_value_chars"] = int(max_value_chars)
+
+    @staticmethod
+    def active() -> bool:
+        """True inside a capture session (``run``/``arun``/``capture``)."""
+        return _TraceSession.current() is not None
+
+    @staticmethod
     def tag(*labels: str, **kwargs: Any) -> None:
         """Attach tags to the current trace node. Visible as badges in the viewer."""
         session = _TraceSession.current()
@@ -479,6 +522,12 @@ class _Trace:
             return
         m = stack[-1].meta
         m.update(kwargs)
+        # Same rule as auto-extracted usage: the summary, graph labels and
+        # model totals read total_tokens, so derive it when only the parts
+        # were given (it used to stay unset and the trace showed 0 tokens).
+        if "total_tokens" not in kwargs and m.get("prompt_tokens") is not None \
+                and m.get("completion_tokens") is not None:
+            m["total_tokens"] = m["prompt_tokens"] + m["completion_tokens"]
         _maybe_add_cost(m)
 
 

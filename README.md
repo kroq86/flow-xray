@@ -295,6 +295,31 @@ def call_llm(prompt):
     return resp.choices[0].message.content
 ```
 
+### Tracing a service: every request, on disk, with issues
+
+`trace.run` captures one script run. For a service, keep a capture per request /
+job and let flow-xray flag problems:
+
+```python
+from flow_xray import TraceStore, trace
+from flow_xray.asgi import TraceMiddleware
+
+trace.configure(max_value_chars=100_000)          # keep full prompts
+store = TraceStore("traces", retention_days=7, max_llm_calls=3)
+
+app.add_middleware(TraceMiddleware, store=store)  # FastAPI / Starlette / any ASGI
+
+with store.capture("job", "reindex", trace_id="job-42"):   # workers, scripts
+    reindex()
+```
+
+```bash
+flow-xray report traces --issues     # recent runs: duration, LLM calls, tokens, issues, HTML path
+```
+
+Built-in issue checks: errors (reported where raised), slow nodes, calls repeated with
+identical inputs, too many model calls; add your own with `TraceStore(rules=[...])`.
+
 ### Redaction and share-safe traces
 
 Use decorator options when a trace may contain secrets or bulky payloads:

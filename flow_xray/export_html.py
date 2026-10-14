@@ -419,12 +419,13 @@ function countRedactions(obj){
 }
 const subtreeStats=new Map();
 function computeSubtree(node){
-  let totalLatency=node.latency_ms||0;
+  // A node's latency already includes its children (they run inside it);
+  // adding the children's again counted nested time several times.
+  const totalLatency=node.latency_ms||0;
   let totalTokens=node.meta&&node.meta.total_tokens?node.meta.total_tokens:0;
   let count=1;
   for(const child of node.children||[]){
     const sub=computeSubtree(child);
-    totalLatency+=sub.totalLatency;
     totalTokens+=sub.totalTokens;
     count+=sub.count;
   }
@@ -454,7 +455,10 @@ nodes.forEach(n=>{
 });
 document.getElementById("sn").textContent=nodes.length;
 document.getElementById("se").textContent=totals.errors;
-const total=nodes.reduce((s,n)=>s+n.latency_ms,0);
+// Wall-clock span of the trace (first root start -> last root end). The sum of
+// all node latencies counted nested calls once per ancestor.
+const rootNodes=TRACE.nodes||[];
+const total=rootNodes.length?Math.max(...rootNodes.map(r=>(r.start_ms||0)+(r.latency_ms||0)))-Math.min(...rootNodes.map(r=>r.start_ms||0)):0;
 document.getElementById("stm").textContent=total.toFixed(1)+"ms";
 if(totals.tokens){document.getElementById("stok").style.display="";document.getElementById("stokv").textContent=totals.tokens}
 if(totals.cost){document.getElementById("scost").style.display="";document.getElementById("scostv").textContent="$"+totals.cost.toFixed(6)}
@@ -538,9 +542,19 @@ function renderOverview(){
   const depthMap={};
   nodes.forEach(n=>{depthMap[n.depth]=(depthMap[n.depth]||0)+1;});
   const maxDepthCount=Math.max(...Object.values(depthMap),1);
-  const nameCounts={};
-  nodes.forEach(n=>{nameCounts[n.name]=(nameCounts[n.name]||0)+1;});
-  const retries=Object.entries(nameCounts).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]);
+  // Same function AND same inputs = a real retry or loop signal; the same
+  // function with different inputs (an agent calling its model each turn)
+  // is normal and listed separately, without a warning.
+  const nameCounts={}, identical={};
+  nodes.forEach(n=>{
+    nameCounts[n.name]=(nameCounts[n.name]||0)+1;
+    const key=n.name+"\u0000"+JSON.stringify(n.inputs||{});
+    identical[key]=(identical[key]||0)+1;
+  });
+  const identicalByName={};
+  Object.entries(identical).forEach(([k,c])=>{if(c>1){const nm=k.split("\u0000")[0];identicalByName[nm]=Math.max(identicalByName[nm]||0,c);}});
+  const retries=Object.entries(identicalByName).sort((a,b)=>b[1]-a[1]);
+  const repeatedFns=Object.entries(nameCounts).filter(([nm,c])=>c>1&&!identicalByName[nm]).sort((a,b)=>b[1]-a[1]);
   const errorNodes=nodes.filter(n=>n.error);
   const modelRows=Object.entries(modelTotals).sort((a,b)=>b[1].tokens-a[1].tokens);
   const tokenRows=topNodes(n=>n.meta&&n.meta.total_tokens?n.meta.total_tokens:0).filter(n=>n.meta&&n.meta.total_tokens).map(n=>`
@@ -618,11 +632,15 @@ function renderOverview(){
   if(retries.length){
     retries.slice(0,8).forEach(([name,count])=>{
       h+=`<div class="rowitem ri-clickable" data-search="${esc(name)}"><div class="top"><b>${esc(name)}</b><span class="badge warn">${count}×</span></div>
-        <div class="small mono">called ${count} times — possible retry or loop</div></div>`;
+        <div class="small mono">${count} calls with identical inputs — possible retry or loop</div></div>`;
     });
   }else{
-    h+='<div class="small" style="color:#484f58;padding:4px 0">No repeated calls detected</div>';
+    h+='<div class="small" style="color:#484f58;padding:4px 0">No calls repeated with identical inputs</div>';
   }
+  repeatedFns.slice(0,8).forEach(([name,count])=>{
+    h+=`<div class="rowitem ri-clickable" data-search="${esc(name)}"><div class="top"><b>${esc(name)}</b><span class="badge">${count}×</span></div>
+      <div class="small mono">called ${count} times with different inputs</div></div>`;
+  });
   h+='</div>';
 
   // error analysis

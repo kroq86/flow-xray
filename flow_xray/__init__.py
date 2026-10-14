@@ -7,6 +7,8 @@ Also includes scalar Value autodiff core + inspection exports.
 """
 
 from flow_xray.trace import TraceNode, TraceResult, trace
+from flow_xray.analyze import analyze, summarize
+from flow_xray.store import TraceStore, annotate
 
 from flow_xray.debugger import GraphDebugger, TwoStepDebugger, iter_backward_steps
 from flow_xray.export_dot import value_graph_to_dot, write_dot
@@ -19,6 +21,11 @@ __all__ = [
     "trace",
     "TraceNode",
     "TraceResult",
+    # persistent capture + issue scan
+    "TraceStore",
+    "annotate",
+    "analyze",
+    "summarize",
     # scalar autodiff
     "Value",
     "backward_from",
@@ -35,4 +42,8 @@ __all__ = [
     "ir_to_json",
 ]
 
-__version__ = "0.3.1"
+try:
+    from importlib.metadata import PackageNotFoundError, version as _version
+    __version__ = _version("flow-xray")
+except PackageNotFoundError:  # running from a source checkout without install
+    __version__ = "0.0.0+unknown"

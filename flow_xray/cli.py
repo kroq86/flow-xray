@@ -1,8 +1,9 @@
 """
 CLI entry points.
 
-``flow-xray run``   — execute a script with @trace, export HTML execution graph.
-``flow-xray dot``   — scalar-Value DOT/HTML export (demo / from script).
+``flow-xray run``    — execute a script with @trace, export HTML execution graph.
+``flow-xray report`` — summarize a TraceStore directory (traces + issues).
+``flow-xray dot``    — scalar-Value DOT/HTML export (demo / from script).
 """
 
 from __future__ import annotations
@@ -49,6 +50,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         "Open the HTML file in your browser to inspect the trace.",
         file=sys.stderr,
     )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# flow-xray report  (persistent store)
+# ---------------------------------------------------------------------------
+
+def cmd_report(args: argparse.Namespace) -> int:
+    from flow_xray.store import TraceStore
+
+    root = Path(args.dir)
+    if not (root / "index.jsonl").is_file():
+        print(f"error: no index.jsonl in {root}", file=sys.stderr)
+        return 2
+    print(TraceStore(root, retention_days=None).report(limit=args.limit, issues_only=args.issues))
     return 0
 
 
@@ -147,6 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     r.set_defaults(func=cmd_run)
 
     # -- flow-xray dot demo ----------------------------------------------
+    rp = sub.add_parser("report", help="summarize a trace store directory: runs, issues, paths")
+    rp.add_argument("dir", help="TraceStore root (contains index.jsonl)")
+    rp.add_argument("--issues", action="store_true", help="only traces with issues")
+    rp.add_argument("--limit", type=int, default=20)
+    rp.set_defaults(func=cmd_report)
+
     d = sub.add_parser("dot", help="scalar-Value DOT subcommands")
     dot_sub = d.add_subparsers(dest="dot_cmd", required=True)
     dd = dot_sub.add_parser("demo", help="built-in (a*b+c).relu().tanh() graph")

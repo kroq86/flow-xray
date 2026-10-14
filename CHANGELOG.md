@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.4.0
+
+**Trace every real run, not just a script** — persistent capture for services.
+- `flow_xray.TraceStore(dir)` — keeps every captured call tree on disk:
+  `<day>/<trace_id>.<kind>.<n>.json|html` plus `index.jsonl` with a summary row
+  (nodes, LLM calls, tokens, cost, wall-clock duration, issues). Several captures
+  of one trace id (a request and the job it triggered) are separate segments.
+  Retention, sampling and a `redact` hook (str -> str) for PII; index appends take a
+  file lock so several processes can share a directory.
+- `store.capture(kind, name, trace_id)` — context manager that records the block
+  (joins an already open capture instead of nesting); `flow_xray.annotate(**fields)`
+  adds summary fields (tenant, user, status) from anywhere inside it.
+- `flow_xray.asgi.TraceMiddleware` — a capture per HTTP request, kept open until the
+  last byte (works for streamed / SSE responses, unlike BaseHTTPMiddleware); trace id
+  from `X-Request-ID`, `X-Trace-Id` / `X-Flow-Trace` response headers, `context` and
+  `on_response` hooks.
+- `flow_xray.analyze(result)` — issue scan: `node_error` (once, where raised),
+  `slow_node`, `identical_calls` (same function + same inputs: retry/loop signal),
+  `many_llm_calls`; app-specific checks via `rules=[...]`; errors inside a handled 4xx
+  are counted, not reported. `flow_xray.summarize(result)`.
+- `flow-xray report <dir> [--issues]` — CLI summary of a store.
+- `trace.configure(max_value_chars=...)` (or `FLOW_XRAY_MAX_VALUE_CHARS`) — recorded
+  values were always cut at 800 chars, dropping most of an agent's prompt.
+
+**Fixes**
+- Inputs are recorded as they were at call time. They used to be kept by reference
+  and serialized at export, so a list the caller kept appending to (an agent's
+  `messages`) showed its final contents on every call — all model calls of a run
+  looked identical.
+- `trace.meta(prompt_tokens=..., completion_tokens=...)` now sets `total_tokens`;
+  the summary showed 0 tokens for manually recorded usage.
+- Viewer "Total" is the wall-clock span of the trace; it was the sum of all node
+  latencies, counting nested time once per ancestor. Subtree latency (and the critical
+  path built on it) no longer double-counts children.
+- "Repeated Calls" warns only for calls with identical inputs; the same function with
+  different inputs (an agent calling its model each turn) is listed without a warning.
+- `flow_xray.__version__` comes from the package metadata (it was stuck at 0.3.1).
+
 ## 0.3.6
 
 **Static context — possible vs actual execution**
