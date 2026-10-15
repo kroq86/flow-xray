@@ -31,6 +31,7 @@ Index appends take an exclusive file lock where the platform has one
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import shutil
@@ -154,25 +155,58 @@ class TraceStore:
         except Exception:
             return None
 
-    def _append(self, row: dict[str, Any]) -> None:
-        line = json.dumps(row, default=str, ensure_ascii=False) + "\n"
-        with self._lock, open(self.root / "index.jsonl", "a", encoding="utf-8") as f:
+    @contextmanager
+    def _index_locked(self) -> Iterator[None]:
+        """Exclusive lock for index writers, on a separate lock file: the
+        index itself is replaced when expired rows are compacted away, and a
+        lock (or an open handle) on the replaced file would protect nothing."""
+        with self._lock, open(self.root / "index.lock", "a") as lock:
             if fcntl is not None:
-                fcntl.flock(f, fcntl.LOCK_EX)
+                fcntl.flock(lock, fcntl.LOCK_EX)
             try:
-                f.write(line)
-                f.flush()
+                yield
             finally:
                 if fcntl is not None:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def _append(self, row: dict[str, Any]) -> None:
+        line = json.dumps(row, default=str, ensure_ascii=False) + "\n"
+        with self._index_locked(), open(self.root / "index.jsonl", "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
 
     def _expire(self, now: datetime) -> None:
+        """Delete day folders older than the retention period, and their rows
+        from the index -- otherwise index.jsonl grows forever with rows
+        pointing at deleted files, and every read scans all of them."""
         if not self.retention_days:
             return
         cutoff = (now - timedelta(days=self.retention_days)).strftime("%Y-%m-%d")
-        for d in self.root.iterdir():
-            if d.is_dir() and _DAY.fullmatch(d.name) and d.name < cutoff:
-                shutil.rmtree(d, ignore_errors=True)
+        expired = [d for d in self.root.iterdir() if d.is_dir() and _DAY.fullmatch(d.name) and d.name < cutoff]
+        for d in expired:
+            shutil.rmtree(d, ignore_errors=True)
+        index = self.root / "index.jsonl"
+        if not index.is_file():
+            return
+        with open(index, encoding="utf-8") as f:
+            first = f.readline()
+        try:
+            oldest = json.loads(first)["ts"][:10]
+        except (ValueError, KeyError, TypeError):
+            oldest = ""
+        if not expired and oldest >= cutoff:
+            return  # nothing to compact: rows are appended in time order
+        with self._index_locked():
+            kept = []
+            for line in index.read_text(encoding="utf-8").splitlines():
+                try:
+                    if json.loads(line)["ts"][:10] >= cutoff:
+                        kept.append(line + "\n")
+                except (ValueError, KeyError, TypeError):
+                    continue  # a torn line from a crash mid-write
+            tmp = index.with_name("index.jsonl.tmp")
+            tmp.write_text("".join(kept), encoding="utf-8")
+            os.replace(tmp, index)
 
     # -- read ---------------------------------------------------------------
 

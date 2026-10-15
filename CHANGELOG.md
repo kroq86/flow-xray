@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1
+
+- `TraceStore` retention now also removes expired rows from `index.jsonl`. Before,
+  day folders were deleted but their rows stayed: the index grew forever with rows
+  pointing at deleted files, and every `entries()` read scanned all of them.
+- Index writers lock a separate `index.lock`, so compaction (an atomic replace of
+  the index) cannot lose rows appended by other processes at the same time
+  (4 concurrent writers x 100 captures during compaction: 400/400 rows).
+
 ## 0.4.0
 
 **Trace every real run, not just a script** — persistent capture for services.
