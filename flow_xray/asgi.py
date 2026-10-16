@@ -9,6 +9,9 @@ ASGI middleware: a flow-xray capture for every HTTP request.
 - The capture stays open until the LAST byte of the response is sent, so a
   streamed response (SSE) records the work done while streaming. (Starlette's
   BaseHTTPMiddleware returns before a streamed body ends.)
+- After the response, persistence is awaited in flow-xray's dedicated pool;
+  the ASGI task stays alive until the write attempt completes. No detached
+  background queue or reduction in capture detail is used.
 - Trace id: the caller's ``X-Request-ID`` when it is well-formed, otherwise a
   new one. Responses carry ``X-Trace-Id`` and, with ``view_url``, a header
   pointing at where the trace can be viewed.
@@ -87,12 +90,13 @@ class TraceMiddleware:
             await send(message)
 
         skip = path in self.skip_paths or (self.skip_prefixes and path.startswith(self.skip_prefixes))
-        capture = nullcontext({}) if skip else self.store.capture("http", f"{method} {path}", trace_id)
-        with (self.context(request) if self.context else nullcontext()), capture as info:
-            try:
-                await http_request(method, path, lambda: self.app(scope, receive, send_with_ids))
-            finally:
-                info["status"] = status["code"]
-                if self.on_response is not None:
-                    self.on_response({**request, "status": status["code"],
-                                      "duration_ms": round((time.perf_counter() - start) * 1000, 1)})
+        capture = nullcontext({}) if skip else self.store.acapture("http", f"{method} {path}", trace_id)
+        with (self.context(request) if self.context else nullcontext()):
+            async with capture as info:
+                try:
+                    await http_request(method, path, lambda: self.app(scope, receive, send_with_ids))
+                finally:
+                    info["status"] = status["code"]
+                    if self.on_response is not None:
+                        self.on_response({**request, "status": status["code"],
+                                          "duration_ms": round((time.perf_counter() - start) * 1000, 1)})

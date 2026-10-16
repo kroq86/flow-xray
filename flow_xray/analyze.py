@@ -30,7 +30,7 @@ as ``handled_errors`` in the summary instead of being reported.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from flow_xray.trace import TraceNode, TraceResult
 
@@ -63,6 +63,7 @@ def analyze(
     result: TraceResult | Iterable[TraceNode],
     *,
     slow_ms: float = 5000.0,
+    slow_ms_by_kind: Mapping[str, float] | None = None,
     max_llm_calls: int | None = None,
     http_status: int | None = None,
     rules: Iterable[Rule] = (),
@@ -79,9 +80,19 @@ def analyze(
             if not handled:
                 issues.append({"kind": "node_error", "node": node.name, "detail": node.error[:300]})
 
+    # Explicit kind budgets also cover parent nodes: a retrieval operation
+    # includes its embedding child. Unconfigured nodes keep the leaf-only
+    # legacy check. Model metadata supplies "llm" when no kind was recorded.
+    budgets = slow_ms_by_kind or {}
     for node in nodes:
-        if not node.children and node.latency_ms > slow_ms:
-            issues.append({"kind": "slow_node", "node": node.name, "ms": round(node.latency_ms)})
+        kind = node.kind or ("llm" if is_llm_node(node) else None)
+        configured = kind in budgets
+        threshold = budgets[kind] if configured else slow_ms
+        if (configured or not node.children) and node.latency_ms > threshold:
+            issue = {"kind": "slow_node", "node": node.name, "ms": round(node.latency_ms)}
+            if configured:
+                issue.update(node_kind=kind, threshold_ms=threshold)
+            issues.append(issue)
 
     counts: dict[tuple[str, str], int] = {}
     for node in nodes:

@@ -31,20 +31,23 @@ Index appends take an exclusive file lock where the platform has one
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import re
 import shutil
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from flow_xray.analyze import Rule, analyze, summarize
 from flow_xray.trace import TraceResult, _TraceSession
+from flow_xray._async_save import run_save
 
 try:  # POSIX
     import fcntl
@@ -54,6 +57,7 @@ except ImportError:  # pragma: no cover - Windows
 _SAFE = re.compile(r"[^A-Za-z0-9._-]")
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 _fields: ContextVar[dict | None] = ContextVar("flow_xray_capture_fields", default=None)
+_LOGGER = logging.getLogger(__name__)
 
 
 def annotate(**fields: Any) -> None:
@@ -73,6 +77,7 @@ class TraceStore:
         redact: Callable[[str], str] | None = None,
         sample: float = 1.0,
         slow_ms: float = 5000.0,
+        slow_ms_by_kind: Mapping[str, float] | None = None,
         max_llm_calls: int | None = None,
         rules: Iterable[Rule] = (),
     ) -> None:
@@ -81,9 +86,11 @@ class TraceStore:
         self.redact = redact
         self.sample = sample
         self.slow_ms = slow_ms
+        self.slow_ms_by_kind = dict(slow_ms_by_kind or {})
         self.max_llm_calls = max_llm_calls
         self.rules = list(rules)
         self._lock = threading.Lock()
+        self._save_failures = 0
 
     # -- capture ------------------------------------------------------------
 
@@ -114,6 +121,69 @@ class TraceStore:
                     self.save(TraceResult(session.roots, error=error, t0=session._session_start_ms),
                               kind=kind, name=name, trace_id=trace_id, **info)
 
+    @asynccontextmanager
+    async def acapture(self, kind: str, name: str, trace_id: str | None = None, **fields: Any):
+        """Capture through the final awaited operation, then await persistence.
+
+        Matches capture() sampling, nesting, annotations and error capture.
+        All save work runs in the trace-only pool. Cancellation is propagated
+        only after the save attempt finishes; SIGKILL cannot be drained.
+        """
+        info: dict[str, Any] = dict(fields)
+        if _TraceSession.current() is not None or random.random() >= self.sample:
+            yield info
+            return
+        session = _TraceSession()
+        token = _fields.set(info)
+        error: BaseException | None = None
+        with session:
+            try:
+                yield info
+            except BaseException as exc:
+                error = exc
+                raise
+            finally:
+                _fields.reset(token)
+                if session.roots:
+                    await self.asave(TraceResult(session.roots, error=error, t0=session._session_start_ms),
+                                     kind=kind, name=name, trace_id=trace_id, **info)
+
+    async def asave(self, result: TraceResult, *, kind: str, name: str, trace_id: str | None = None,
+                    **fields: Any) -> dict[str, Any] | None:
+        """Await save() in a dedicated pool, preserving its format and result.
+
+        The caller must not mutate result until this await completes. Returns
+        None on failure, with a logged error and an incremented failure counter.
+        No tree is dropped because the executor is busy: callers await capacity.
+        """
+        if not result.roots:
+            return None
+        return await run_save(partial(self.save, result, kind=kind, name=name, trace_id=trace_id, **fields),
+                              partial(self._save_failed, trace_id, kind, name))
+
+    def _save_failed(self, trace_id: str | None, kind: str, name: str) -> None:
+        with self._lock:
+            self._save_failures += 1
+        try:
+            _LOGGER.exception("trace_save_failed", extra={"trace_id": trace_id, "trace_kind": kind,
+                                                         "trace_name": name})
+        except Exception:
+            # A broken logging handler must not replace the application's
+            # outcome. The failure counter remains available to /metrics.
+            pass
+
+    @property
+    def save_failures(self) -> int:
+        """Failed save attempts, including synchronous and asynchronous writes."""
+        with self._lock:
+            return self._save_failures
+
+    def prometheus_metrics(self) -> str:
+        """Append to the application's /metrics response; no server dependency."""
+        return ("# HELP trace_save_failed_total Trace persistence attempts that failed\n"
+                "# TYPE trace_save_failed_total counter\n"
+                f"trace_save_failed_total {self.save_failures}\n")
+
     # -- write --------------------------------------------------------------
 
     def save(self, result: TraceResult, *, kind: str, name: str, trace_id: str | None = None,
@@ -125,7 +195,8 @@ class TraceStore:
         try:
             trace_id = trace_id or f"{int(time.time() * 1000)}-{random.randrange(16**6):06x}"
             status = fields.get("status") if isinstance(fields.get("status"), int) else None
-            issues = analyze(result, slow_ms=self.slow_ms, max_llm_calls=self.max_llm_calls,
+            issues = analyze(result, slow_ms=self.slow_ms, slow_ms_by_kind=self.slow_ms_by_kind,
+                             max_llm_calls=self.max_llm_calls,
                              http_status=status, rules=self.rules)
             now = datetime.now(timezone.utc)
             day = self.root / now.strftime("%Y-%m-%d")
@@ -134,13 +205,16 @@ class TraceStore:
             safe_kind = _SAFE.sub("_", kind)
             with self._lock:
                 n = 0
-                while (day / f"{safe_id}.{safe_kind}.{n}.json").exists():
-                    n += 1
-                # Names are built explicitly: Path.with_suffix would treat the
-                # segment number ".n" as a suffix and drop it (segments collided).
-                json_path = day / f"{safe_id}.{safe_kind}.{n}.json"
+                while True:
+                    json_path = day / f"{safe_id}.{safe_kind}.{n}.json"
+                    try:
+                        # Reserve atomically across stores/processes too.
+                        with json_path.open("x", encoding="utf-8"):
+                            pass
+                        break
+                    except FileExistsError:
+                        n += 1
                 html_path = day / f"{safe_id}.{safe_kind}.{n}.html"
-                json_path.touch()
             json_text = result.to_json()
             json_path.write_text(self.redact(json_text) if self.redact else json_text, encoding="utf-8")
             result.to_html(str(html_path), title=f"{kind} {name} — {trace_id}")
@@ -153,6 +227,7 @@ class TraceStore:
             self._expire(now)
             return row
         except Exception:
+            self._save_failed(trace_id, kind, name)
             return None
 
     @contextmanager

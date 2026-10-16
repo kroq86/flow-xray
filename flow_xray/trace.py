@@ -400,7 +400,7 @@ class _Trace:
                     result = await fn(*args, **kwargs)
                     session.exit_node(node, result if capture_output else "[redacted]", None)
                     return result
-                except Exception as e:
+                except BaseException as e:
                     session.exit_node(node, None, f"{type(e).__name__}: {e}")
                     raise
             async_wrapper._traced = True  # type: ignore[attr-defined]

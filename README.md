@@ -311,7 +311,30 @@ app.add_middleware(TraceMiddleware, store=store)  # FastAPI / Starlette / any AS
 
 with store.capture("job", "reindex", trace_id="job-42"):   # workers, scripts
     reindex()
+
+async with store.acapture("mcp", "search", trace_id="call-42"):
+    await search()                              # async tools / jobs
+
+await store.asave(result, kind="eval", name="candidate")  # an existing TraceResult
 ```
+
+ASGI captures through the final response byte (including SSE), then awaits the
+JSON + HTML + index write in a dedicated two-thread pool. Callers await capacity;
+traces are not dropped when the pool is busy. The pool is separate from asyncio's
+default executor. `capture()` / `save()` remain synchronous and compatible.
+
+Failures return `None` as before, but now log `trace_save_failed` and increment
+`store.save_failures`. Append `store.prometheus_metrics()` to your application's
+`/metrics` response to expose `trace_save_failed_total`; the library starts no
+metrics server. A failed trace write does not replace the application's result.
+
+Cancellation waits for the save attempt before propagating. Drain request/capture
+tasks before stopping the event loop: Uvicorn's normal graceful shutdown does this
+for ASGI requests. SIGKILL, a hard shutdown deadline, disk failure, or stopping the
+loop with unfinished captures can still lose a trace; there is no durable spool
+or fsync-based crash guarantee. Draining depends on storage making progress.
+Do not mutate a `TraceResult` while its `asave()` is pending. See
+[the persistence checks and bounded measurement](docs/async-persistence.md).
 
 ```bash
 flow-xray report traces --issues     # recent runs: duration, LLM calls, tokens, issues, HTML path
@@ -436,3 +459,12 @@ Scalar autodiff core (micrograd-style `Value` graph with DOT/JSON export and ste
 ## License
 
 MIT
+
+### Latency budgets by node kind
+
+`TraceStore(..., slow_ms_by_kind={"retrieval": 100, "embedding": 1000, "llm": 5000})`
+(or `analyze(result, slow_ms_by_kind=...)`) flags operations against their own
+budget. Set kinds with `@trace(kind="retrieval")`; model metadata implies `llm`
+only when an explicit kind is absent. Configured kinds include child time.
+Other nodes retain the existing `slow_ms=5000` leaf-only check. Findings include
+`node_kind` and `threshold_ms`; recorded call trees are unchanged.

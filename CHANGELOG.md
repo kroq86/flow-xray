@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 (unreleased)
+
+- Optional `slow_ms_by_kind` budgets in the analyzer and store, including typed parent operations.
+
+- `TraceStore.acapture()` and `asave()` await complete persistence in a dedicated
+  two-thread pool. ASGI uses `acapture()` after the last response byte, including
+  SSE. The synchronous API, JSON/HTML representation, detail limits, annotations,
+  sampling and retention remain compatible. Busy writers apply backpressure;
+  there is no detached queue with a drop policy.
+- Cancelled callers await their admitted write attempt before cancellation is
+  propagated. Async traced nodes now record `CancelledError` and close their
+  timing/stack correctly. Normal shutdown must drain request/capture tasks;
+  forced termination and storage failure remain explicit limits.
+- Failed saves log `trace_save_failed` and increment `TraceStore.save_failures`.
+  `prometheus_metrics()` exposes the counter for an application's `/metrics`.
+  Trace failures preserve the captured application's result/error.
+- Segment file names are reserved exclusively across store instances/processes,
+  preventing concurrent writers with the same trace id from overwriting a segment.
+
 ## 0.4.1
 
 - `TraceStore` retention now also removes expired rows from `index.jsonl`. Before,

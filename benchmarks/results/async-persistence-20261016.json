@@ -1,0 +1,124 @@
+{
+  "baseline_commit": "906c7c5",
+  "classification": "implementation validation and engineering trade-off",
+  "baseline": {
+    "python": "3.12.13",
+    "source": "/private/tmp/flow-xray-async-20261016/baseline",
+    "fixture_documents": 20,
+    "document_chars": 664,
+    "ticker_ms": 2,
+    "series": [
+      {
+        "requests": 8,
+        "saved": 8,
+        "elapsed_ms": 62.244,
+        "max_loop_lag_ms": 61.131,
+        "p95_loop_lag_ms": 61.131,
+        "mean_trace_bytes": {
+          "json": 29228,
+          "html": 66417
+        }
+      },
+      {
+        "requests": 8,
+        "saved": 8,
+        "elapsed_ms": 86.141,
+        "max_loop_lag_ms": 85.06,
+        "p95_loop_lag_ms": 85.06,
+        "mean_trace_bytes": {
+          "json": 29229,
+          "html": 66418
+        }
+      },
+      {
+        "requests": 8,
+        "saved": 8,
+        "elapsed_ms": 63.42,
+        "max_loop_lag_ms": 62.386,
+        "p95_loop_lag_ms": 62.386,
+        "mean_trace_bytes": {
+          "json": 29229,
+          "html": 66418
+        }
+      }
+    ]
+  },
+  "candidate": {
+    "python": "3.12.13",
+    "source": ".",
+    "fixture_documents": 20,
+    "document_chars": 664,
+    "ticker_ms": 2,
+    "series": [
+      {
+        "requests": 8,
+        "saved": 8,
+        "elapsed_ms": 74.342,
+        "max_loop_lag_ms": 6.232,
+        "p95_loop_lag_ms": 4.486,
+        "mean_trace_bytes": {
+          "json": 29226,
+          "html": 66415
+        }
+      },
+      {
+        "requests": 8,
+        "saved": 8,
+        "elapsed_ms": 62.288,
+        "max_loop_lag_ms": 2.738,
+        "p95_loop_lag_ms": 2.706,
+        "mean_trace_bytes": {
+          "json": 29227,
+          "html": 66416
+        }
+      },
+      {
+        "requests": 8,
+        "saved": 8,
+        "elapsed_ms": 60.189,
+        "max_loop_lag_ms": 5.425,
+        "p95_loop_lag_ms": 5.362,
+        "mean_trace_bytes": {
+          "json": 29227,
+          "html": 66416
+        }
+      }
+    ]
+  },
+  "byte_parity": {
+    "same_captured_TraceResult": true,
+    "files": {
+      ".json": {
+        "bytes": 140752,
+        "equal": true
+      },
+      ".html": {
+        "bytes": 178385,
+        "equal": true
+      }
+    }
+  },
+  "validation": {
+    "python_3_12": {
+      "passed": 81,
+      "skipped_optional_server": 1
+    },
+    "python_3_14": {
+      "passed": 82,
+      "skipped": 0
+    },
+    "uvicorn": "0.53.0",
+    "httpx": "0.28.1",
+    "wheel_smoke": "passed"
+  },
+  "candidate_source_sha256": {
+    "flow_xray/_async_save.py": "b16c9bf62cd7017a0ceaab4c03d1102a6991a2f0667a84b2003f0e3f4842762c",
+    "flow_xray/store.py": "3dbec49fe264a21124eacc8f67604390c3c360871836b9562c3cb926ae8436b3",
+    "flow_xray/asgi.py": "82c6e2945272297f9c94b553c9e3f1b55484f0dff2c31124a14444c9a6d51238",
+    "flow_xray/trace.py": "f8c282f35842ef8a408decd420f45d0f5c14c2897f092428bdfd90e2d55f8a1a",
+    "tests/test_store.py": "cdcfcd454b37fa738faefb467faf762d523323cff35277df21c18d52b2a7dd11",
+    "tests/test_store_server.py": "9204889766f7b873c74a76c641f886f95c7d686117caa277f9cad90d2af93d99",
+    "benchmarks/async_persistence.py": "ce99cec78e860f0fd0f14fe2cee60ba1f98cadca3ec31ae2a975483994d2d4c7",
+    "benchmarks/compare_persistence.py": "bd0b101639423737f95136cc649f1abacded8ba7f5f2a50a890c9280ac81a33c"
+  }
+}
