@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 (unreleased)
+## 0.5.0 (2026-10-16)
 
 - Optional `slow_all_nodes=True` checks every node against `slow_ms`, including
   parents. Findings identify the exact call and its elapsed/self wall time.
