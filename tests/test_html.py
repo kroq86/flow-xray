@@ -41,3 +41,17 @@ def test_trace_html_uses_flattened_total_latency() -> None:
     assert "Raw Node JSON" in viewer_html
     assert "bindToolbar()" in viewer_html
     assert "navigator.clipboard.writeText" in viewer_html
+
+
+def test_trace_and_placeholder_strings_stay_complete_and_cannot_close_script():
+    import json, re
+    from flow_xray import TraceNode, TraceResult
+    value = '__LATENCY_JSON__ __STATIC_JSON__ </script><script>bad()</script>'
+    result = TraceResult([TraceNode('work', 'r', {'input': value}, output=value, latency_ms=51)])
+    before = result.to_json()
+    rendered = trace_to_standalone_html(result, title='__LATENCY_JSON__ <title>')
+    embedded = json.loads(re.search(r'const TRACE=(.*);', rendered)[1])
+    assert embedded == result.to_dict()
+    assert rendered.count('</script>') == 1
+    assert '__LATENCY_JSON__ &lt;title&gt;' in rendered
+    assert result.to_json() == before

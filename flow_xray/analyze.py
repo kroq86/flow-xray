@@ -12,7 +12,8 @@ Built-in checks are generic:
 
 - ``node_error``     an exception, reported once at the node that raised it
                      (not again at every ancestor it propagated through);
-- ``slow_node``      a leaf node slower than ``slow_ms``;
+- ``slow_node``      a node slower than ``slow_ms`` (leaves by default, all
+                     nodes with ``slow_all_nodes=True``; kinds can override);
 - ``identical_calls`` the same function called more than once with identical
                      inputs (retry or loop signal; repeated calls with
                      different inputs are normal and not reported);
@@ -59,11 +60,48 @@ def _input_key(node: TraceNode) -> str:
         return repr(node.inputs)
 
 
+def self_time_ms(node: TraceNode) -> float:
+    """Wall time outside recorded child intervals, not CPU or blocking time.
+
+    Clip to the parent and merge overlapping async children before subtracting:
+    summing their durations would subtract concurrent time more than once.
+    Uninstrumented work, waits and scheduler delays remain indistinguishable.
+    """
+    start, end = node.start_ms, node.start_ms + max(0.0, node.latency_ms)
+    intervals = sorted((max(start, c.start_ms), min(end, c.start_ms + max(0.0, c.latency_ms)))
+                       for c in node.children)
+    covered, cursor = 0.0, start
+    for left, right in intervals:
+        left = max(left, cursor)
+        if right > left:
+            covered += right - left
+            cursor = right
+    return max(0.0, node.latency_ms - covered)
+
+
+def latency_profile(result: TraceResult | Iterable[TraceNode], *, slow_ms: float = 50.0,
+                    slow_ms_by_kind: Mapping[str, float] | None = None) -> dict[str, dict[str, Any]]:
+    """Per-node traffic lights; separate derived data, leaving the tree intact."""
+    budgets = slow_ms_by_kind or {}
+    profile = {}
+    for root in _roots(result):
+        for node in walk(root):
+            kind = node.kind or ("llm" if is_llm_node(node) else None)
+            threshold = budgets.get(kind, slow_ms)
+            profile[node.node_id] = {
+                "elapsed_ms": round(node.latency_ms, 3), "self_ms": round(self_time_ms(node), 3),
+                "threshold_ms": threshold, "above_threshold": node.latency_ms > threshold,
+                "level": "error" if node.error else "warning" if node.latency_ms > threshold else "ok",
+            }
+    return profile
+
+
 def analyze(
     result: TraceResult | Iterable[TraceNode],
     *,
     slow_ms: float = 5000.0,
     slow_ms_by_kind: Mapping[str, float] | None = None,
+    slow_all_nodes: bool = False,
     max_llm_calls: int | None = None,
     http_status: int | None = None,
     rules: Iterable[Rule] = (),
@@ -88,10 +126,14 @@ def analyze(
         kind = node.kind or ("llm" if is_llm_node(node) else None)
         configured = kind in budgets
         threshold = budgets[kind] if configured else slow_ms
-        if (configured or not node.children) and node.latency_ms > threshold:
+        if (slow_all_nodes or configured or not node.children) and node.latency_ms > threshold:
             issue = {"kind": "slow_node", "node": node.name, "ms": round(node.latency_ms)}
             if configured:
                 issue.update(node_kind=kind, threshold_ms=threshold)
+            if slow_all_nodes:
+                issue.update(node_id=node.node_id, threshold_ms=threshold,
+                             elapsed_ms=round(node.latency_ms, 3), self_ms=round(self_time_ms(node), 3),
+                             severity="warning")
             issues.append(issue)
 
     counts: dict[tuple[str, str], int] = {}

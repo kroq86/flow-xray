@@ -78,6 +78,7 @@ class TraceStore:
         sample: float = 1.0,
         slow_ms: float = 5000.0,
         slow_ms_by_kind: Mapping[str, float] | None = None,
+        slow_all_nodes: bool = False,
         max_llm_calls: int | None = None,
         rules: Iterable[Rule] = (),
     ) -> None:
@@ -87,6 +88,7 @@ class TraceStore:
         self.sample = sample
         self.slow_ms = slow_ms
         self.slow_ms_by_kind = dict(slow_ms_by_kind or {})
+        self.slow_all_nodes = slow_all_nodes
         self.max_llm_calls = max_llm_calls
         self.rules = list(rules)
         self._lock = threading.Lock()
@@ -196,6 +198,7 @@ class TraceStore:
             trace_id = trace_id or f"{int(time.time() * 1000)}-{random.randrange(16**6):06x}"
             status = fields.get("status") if isinstance(fields.get("status"), int) else None
             issues = analyze(result, slow_ms=self.slow_ms, slow_ms_by_kind=self.slow_ms_by_kind,
+                             slow_all_nodes=self.slow_all_nodes,
                              max_llm_calls=self.max_llm_calls,
                              http_status=status, rules=self.rules)
             now = datetime.now(timezone.utc)
@@ -217,7 +220,8 @@ class TraceStore:
                 html_path = day / f"{safe_id}.{safe_kind}.{n}.html"
             json_text = result.to_json()
             json_path.write_text(self.redact(json_text) if self.redact else json_text, encoding="utf-8")
-            result.to_html(str(html_path), title=f"{kind} {name} — {trace_id}")
+            result.to_html(str(html_path), title=f"{kind} {name} — {trace_id}",
+                           slow_ms=self.slow_ms, slow_ms_by_kind=self.slow_ms_by_kind)
             if self.redact:
                 html_path.write_text(self.redact(html_path.read_text(encoding="utf-8")), encoding="utf-8")
             row = {"ts": now.isoformat(), "trace_id": trace_id, "kind": kind, "name": name,

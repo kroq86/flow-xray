@@ -2,6 +2,15 @@
 
 ## 0.5.0 (unreleased)
 
+- Optional `slow_all_nodes=True` checks every node against `slow_ms`, including
+  parents. Findings identify the exact call and its elapsed/self wall time.
+- HTML and DOT show per-node latency traffic lights; direct exports default
+  to 50 ms. Stored HTML follows the store thresholds. All exceeding nodes
+  are listed with navigation, and overlapping child time is merged before
+  computing self time. Full trace JSON stays unchanged.
+- Embedded trace strings cannot terminate the viewer script or recursively
+  expand template placeholders. Viewer path time no longer sums nested spans.
+
 - Optional `slow_ms_by_kind` budgets in the analyzer and store, including typed parent operations.
 
 - `TraceStore.acapture()` and `asave()` await complete persistence in a dedicated

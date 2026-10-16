@@ -4,6 +4,12 @@ Scope: flow-xray 0.5.0 candidate against 0.4.1, commit `906c7c5`. No application
 integration, production traffic, LLM calls or remote services are part of the
 measurement. This is implementation validation and an engineering trade-off.
 
+The benchmark below covers persistence before the per-node traffic-light UI,
+commit `b15c00f`. The newer viewer adds diagnostic fields and therefore is no
+longer byte-identical HTML to 0.4.1. Full trace JSON remains unchanged; current
+sync/async saves still have byte-identical JSON and HTML in the regression test.
+No new performance measurement is claimed for the viewer additions.
+
 ## Contract and decision
 
 Keep the synchronous API. Add `acapture()` / `asave()` in the library, and use

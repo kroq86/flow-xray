@@ -34,7 +34,7 @@ from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 _UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", re.IGNORECASE)
@@ -254,14 +254,18 @@ class TraceResult:
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
-    def to_html(self, path: str, *, title: str = "flow-xray trace", static_index: Any | None = None) -> None:
+    def to_html(self, path: str, *, title: str = "flow-xray trace", static_index: Any | None = None,
+                slow_ms: float = 50.0, slow_ms_by_kind: Mapping[str, float] | None = None) -> None:
         from flow_xray.export_html import trace_to_standalone_html
         from pathlib import Path
         Path(path).write_text(
-            trace_to_standalone_html(self, title=title, static_index=static_index), encoding="utf-8",
+            trace_to_standalone_html(self, title=title, static_index=static_index,
+                                     slow_ms=slow_ms, slow_ms_by_kind=slow_ms_by_kind), encoding="utf-8",
         )
 
-    def to_dot(self) -> str:
+    def to_dot(self, *, slow_ms: float = 50.0, slow_ms_by_kind: Mapping[str, float] | None = None) -> str:
+        from flow_xray.analyze import latency_profile
+        profile = latency_profile(self, slow_ms=slow_ms, slow_ms_by_kind=slow_ms_by_kind)
         flat = _flatten(self.roots)
         lines = [
             "digraph G {",
@@ -271,7 +275,7 @@ class TraceResult:
             '  edge [color="#30363d", arrowsize=0.7];',
         ]
         for n, pid in flat:
-            color = "#da3633" if n["error"] else ("#9e6a03" if n["latency_ms"] > 1000 else "#238636")
+            color = {"error": "#da3633", "warning": "#d29922", "ok": "#238636"}[profile[n["id"]]["level"]]
             meta = n.get("meta", {})
             tok_part = f'\\n{meta["total_tokens"]} tok' if meta.get("total_tokens") else ""
             label = f'{n["name"]}\\n{n["latency_ms"]}ms{tok_part}'

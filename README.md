@@ -468,3 +468,31 @@ budget. Set kinds with `@trace(kind="retrieval")`; model metadata implies `llm`
 only when an explicit kind is absent. Configured kinds include child time.
 Other nodes retain the existing `slow_ms=5000` leaf-only check. Findings include
 `node_kind` and `threshold_ms`; recorded call trees are unchanged.
+
+### Traffic lights for every measured node
+
+For a uniform 50 ms inspection threshold use
+`TraceStore(..., slow_ms=50, slow_all_nodes=True)`. Every recorded call,
+including parents and model calls, is checked. `slow_node` findings contain
+`node_id`, `elapsed_ms`, `self_ms`, `threshold_ms` and warning severity.
+The existing leaf-only default and optional kind overrides remain available.
+
+The stored HTML uses the store's thresholds. Direct `TraceResult.to_html()`
+and `to_dot()` use 50 ms by default (configurable via `slow_ms` and
+`slow_ms_by_kind`). Green means at or below threshold, yellow means above,
+red means an exception. The overview lists **all** above-threshold nodes,
+ordered by self wall time, and each entry opens that exact call. Timeline,
+graph and Gantt use the same classification. Exactly 50 ms is green. Displayed times are rounded to 0.001 ms;
+classification uses unrounded clock values.
+
+Self wall time subtracts the **union** of recorded child intervals, clipped
+to the parent. Parallel children are not double-counted. It includes waits,
+scheduler delay and uninstrumented work: neither elapsed nor self wall time
+proves CPU cost or event-loop blocking. A slow LLM call is a signal to inspect,
+not automatically a defect. Only instrumented nodes are observable. Existing
+saved HTML/index rows retain their old viewer/findings; new saves use this policy.
+Full trace JSON, inputs, outputs and metadata remain unchanged.
+
+Optional DOM regression (install jsdom outside the runtime environment):
+`FLOW_XRAY_JSDOM=/path/to/node_modules/jsdom python -m pytest tests/test_html_dom.py`.
+The network renderer is stubbed there; viewer classification/navigation runs.

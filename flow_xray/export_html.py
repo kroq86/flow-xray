@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from pathlib import Path
+from typing import Mapping
 
 
 def standalone_viewer_html(dot: str, *, title: str = "flow-xray graph") -> str:
@@ -210,6 +212,8 @@ def trace_to_standalone_html(
     *,
     title: str = "flow-xray trace",
     static_index: object | None = None,
+    slow_ms: float = 50.0,
+    slow_ms_by_kind: Mapping[str, float] | None = None,
 ) -> str:
     """
     Return a self-contained HTML document that renders a ``TraceResult``
@@ -225,12 +229,16 @@ def trace_to_standalone_html(
         _static_payload(static_index) if static_index is not None else None, ensure_ascii=False,
     )
     safe_title = html.escape(title, quote=True)
-    return (
-        _TRACE_HTML_TEMPLATE
-        .replace("__TITLE__", safe_title)
-        .replace("__TRACE_JSON__", trace_json)
-        .replace("__STATIC_JSON__", static_json)
-    )
+    from flow_xray.analyze import latency_profile
+    latency_json = json.dumps(latency_profile(trace_result, slow_ms=slow_ms,
+                                             slow_ms_by_kind=slow_ms_by_kind))
+    values = {"TITLE": safe_title, "TRACE_JSON": trace_json, "STATIC_JSON": static_json,
+              "LATENCY_JSON": latency_json}
+    # Embedded data cannot close its script or be interpreted as another
+    # template placeholder; decoded trace inputs/outputs remain complete.
+    return re.sub(r"__(TITLE|TRACE_JSON|STATIC_JSON|LATENCY_JSON)__",
+                  lambda m: values[m[1]].replace("<", r"\u003c") if m[1] != "TITLE" else values[m[1]],
+                  _TRACE_HTML_TEMPLATE)
 
 
 _TRACE_HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -279,6 +287,9 @@ header h1{font-size:15px;font-weight:600}
 .timeline-item.selected{border-color:#58a6ff;box-shadow:0 0 0 1px #58a6ff inset}
 .timeline-item .kind{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e}
 .timeline-item .summary{margin-top:4px}
+.timeline-item[data-level="ok"]{border-left:4px solid #238636}
+.timeline-item[data-level="warning"]{border-left:4px solid #d29922}
+.timeline-item[data-level="error"]{border-left:4px solid #da3633}
 #rawview{padding:18px}
 .subctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 #rawstats{font-size:12px;color:#8b949e}
@@ -339,6 +350,7 @@ header h1{font-size:15px;font-weight:600}
  <span class="st">Nodes: <b id="sn">-</b></span>
  <span class="st">Total: <b id="stm">-</b></span>
  <span class="st">Errors: <b id="se" class="err">-</b></span>
+ <span class="st">Above threshold: <b id="sslow" class="warn">-</b></span>
  <span class="st" id="stok" style="display:none">Tokens: <b id="stokv">-</b></span>
  <span class="st" id="scost" style="display:none">Cost: <b id="scostv" class="warn">-</b></span>
  <div class="ctl">
@@ -378,6 +390,7 @@ header h1{font-size:15px;font-weight:600}
 <script type="module">
 const TRACE=__TRACE_JSON__;
 const STATIC=__STATIC_JSON__;
+const LATENCY=__LATENCY_JSON__;
 const STATIC_FUNCS=STATIC?new Set(STATIC.functions):new Set();
 let showStatic=false;
 let ghostNameById={};
@@ -407,6 +420,14 @@ function flat(roots,pid=null,depth=0,acc=[]){
 }
 const nodes=flat(TRACE.nodes);
 const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
+function timing(n){return LATENCY[n.id]}
+function nodeColor(n){return timing(n).level==='error'?'#da3633':timing(n).level==='warning'?'#d29922':'#238636'}
+function aboveThreshold(n){return timing(n).above_threshold}
+function nodeStatus(n){return timing(n).level==='error'?'ERROR':aboveThreshold(n)?`WARNING (> ${timing(n).threshold_ms} ms)`:'OK'}
+const slowNodes=nodes.filter(aboveThreshold).sort((a,b)=>timing(b).self_ms-timing(a).self_ms);
+const thresholds=[...new Set(Object.values(LATENCY).map(t=>t.threshold_ms))];
+const thresholdText=thresholds.length===1?`${thresholds[0]} ms`:'per-kind thresholds';
+document.getElementById('sslow').textContent=slowNodes.length;
 function esc(s){const d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
 function fmtMs(v){return v<1?v.toFixed(2):v<100?v.toFixed(1):Math.round(v)}
 function nodeText(n){return JSON.stringify({name:n.name,inputs:n.inputs,output:n.output,error:n.error,meta:n.meta})}
@@ -469,8 +490,9 @@ function mkDot(){
   d+='  node [shape=box,style="rounded,filled",fontname="Helvetica",fontsize=11,margin="0.3,0.15"];\n';
   d+='  edge [color="#30363d",arrowsize=0.7];\n';
   for(const n of nodes){
-    const c=n.error?"#da3633":(n.latency_ms||0)>1000?"#9e6a03":n.kind==='llm'?"#1f6feb":n.kind==='tool'?"#8250df":n.kind==='agent'?"#0ea5e9":"#238636";
+    const c=nodeColor(n);
     let lb=n.name+"\\n"+fmtMs(n.latency_ms)+"ms";
+    lb+="\\nself "+fmtMs(timing(n).self_ms)+" ms";
     if(n.meta&&n.meta.total_tokens!=null)lb+="\\n"+n.meta.total_tokens+" tok";
     d+=`  ${n.id} [label="${lb}",fillcolor="${c}",fontcolor="white",tooltip="${n.id}"];\n`;
   }
@@ -579,6 +601,16 @@ function renderOverview(){
       <div class="card"><div class="k">Redactions</div><div class="v">${totals.redactions}</div></div>
     </div>`;
 
+  h+='<div class="panel" id="latency-findings" style="margin-bottom:14px"><h3>Node latency traffic lights</h3>';
+  h+=`<p class="small">Threshold: <b id="latency-threshold">${esc(thresholdText)}</b></p>`;
+  h+='<p class="small">Green: at or below threshold · Yellow: above threshold · Red: error. Every recorded node is checked, including parents.</p>';
+  h+='<p class="small" style="margin:8px 0">All nodes above threshold, ordered by self wall time. Self excludes the union of recorded child intervals; it includes untraced work and waits, and is not CPU or event-loop blocking time.</p>';
+  h+='<p class="small" style="margin-bottom:8px">Displayed times are rounded to 0.001 ms; threshold flags use the unrounded clock values.</p>';
+  h+=slowNodes.length?slowNodes.map(n=>`<div class="rowitem" data-nid="${esc(n.id)}" data-level="${timing(n).level}" style="cursor:pointer;border-left:4px solid ${nodeColor(n)}">
+    <div class="top"><b>${esc(n.name)}</b><span class="small mono">${timing(n).elapsed_ms.toFixed(3)} ms · self ${timing(n).self_ms.toFixed(3)} ms</span></div>
+    <div class="small mono">${esc(n.id)} · threshold ${timing(n).threshold_ms} ms${n.kind?' · '+esc(n.kind):''}${n.pid?' · parent '+esc(byId[n.pid].name):''}</div></div>`).join(''):'<p class="small">No recorded node exceeded its threshold.</p>';
+  h+='</div>';
+
   // critical path — full width
   h+='<div class="panel" style="margin-bottom:14px"><h3>Critical Path</h3>';
   if(critPath.length){
@@ -588,8 +620,8 @@ function renderOverview(){
       h+=`<button class="pnode${n.error?' er':''}" data-nid="${esc(n.id)}" title="${esc(n.id)}">${esc(n.name)}<span style="color:#8b949e;font-size:10px;margin-left:4px">${fmtMs(n.latency_ms)}ms</span></button>`;
     });
     h+='</div>';
-    const cpLat=critPath.reduce((s,n)=>s+(n.latency_ms||0),0);
-    h+=`<div class="small" style="margin-top:4px">${critPath.length} node${critPath.length>1?'s':''} · ${cpLat.toFixed(1)} ms along path</div>`;
+    const cpLat=critPath[0].latency_ms||0;
+    h+=`<div class="small" style="margin-top:4px">${critPath.length} node${critPath.length>1?'s':''} · ${cpLat.toFixed(1)} ms in root span (includes nested time)</div>`;
   }else{
     h+='<div class="small">No nodes</div>';
   }
@@ -599,7 +631,7 @@ function renderOverview(){
   h+='<div class="panel" style="margin-bottom:14px"><h3>Latency Waterfall <span class="small">(top 10)</span></h3>';
   topByLat.forEach(n=>{
     const pct=((n.latency_ms||0)/maxLat*100).toFixed(1);
-    const col=n.error?'#da3633':(n.latency_ms||0)>1000?'#d29922':'#238636';
+    const col=nodeColor(n);
     const sharePct=total>0?((n.latency_ms||0)/total*100).toFixed(1):'0.0';
     h+=`<div class="ri-bar-row" data-nid="${esc(n.id)}">
       <span class="ri-lbl">${esc(n.name)}</span>
@@ -688,10 +720,10 @@ function renderOverview(){
 function renderTimeline(query=""){
   const q=query.trim().toLowerCase();
   const items=nodes.filter(n=>!q||nodeText(n).toLowerCase().includes(q)).map(n=>`
-    <div class="timeline-item${q?' match':''}" data-node-id="${esc(n.id)}" style="margin-left:${Math.min((n.depth||0)*18,72)}px">
-      <div class="kind">step ${n.order+1} · ${n.error?"error":"ok"} · depth ${n.depth}</div>
+    <div class="timeline-item${q?' match':''}" data-node-id="${esc(n.id)}" data-level="${timing(n).level}" style="margin-left:${Math.min((n.depth||0)*18,72)}px">
+      <div class="kind">step ${n.order+1} · ${nodeStatus(n)} · depth ${n.depth}</div>
       <div class="summary"><b>${esc(n.name)}</b> <span class="small mono">${fmtMs(n.latency_ms)} ms</span></div>
-      <div class="small mono">${esc(n.id)}${n.meta&&n.meta.total_tokens!=null?` · ${n.meta.total_tokens} tok`:""}</div>
+      <div class="small mono">${esc(n.id)} · self ${timing(n).self_ms.toFixed(3)} ms${n.meta&&n.meta.total_tokens!=null?` · ${n.meta.total_tokens} tok`:""}</div>
     </div>`).join("") || '<div id="hint">No timeline items match the current filter.</div>';
   document.getElementById("timeline").innerHTML=items;
   document.querySelectorAll('.timeline-item[data-node-id]').forEach(el=>{
@@ -730,8 +762,10 @@ function detailText(n){
     `child_count: ${(n.children||[]).length}`,
     `subtree_nodes: ${sub.count}`,
     `latency_ms: ${n.latency_ms.toFixed(2)}`,
+    `self_wall_ms: ${timing(n).self_ms.toFixed(3)}`,
+    `threshold_ms: ${timing(n).threshold_ms}`,
     `subtree_latency_ms: ${sub.totalLatency.toFixed(2)}`,
-    `status: ${n.error ? "ERROR" : "OK"}`,
+    `status: ${nodeStatus(n)}`,
   ];
   if(sub.totalTokens)parts.push(`subtree_tokens: ${sub.totalTokens}`);
   if(n.error)parts.push(`error: ${n.error}`);
@@ -753,9 +787,9 @@ function showDet(n){
   selectedNode=n||null;
   if(!n){det.innerHTML='<div id="hint">Click a node or timeline item to inspect</div>';return}
   const sub=subtreeStats.get(n.id)||{totalLatency:n.latency_ms||0,totalTokens:n.meta&&n.meta.total_tokens?n.meta.total_tokens:0,count:1};
-  const st=n.error?`<span class="er">ERROR</span>`:`<span class="ok">OK</span>`;
+  const st=`<span class="${timing(n).level==='error'?'er':timing(n).level==='warning'?'warn':'ok'}">${nodeStatus(n)}</span>`;
   const ms=n.latency_ms.toFixed(2);
-  const summaryText=`status: ${n.error?"ERROR":"OK"}\nnode: ${n.id}\nparent: ${n.pid || "(root)"}\ndepth: ${n.depth}\nchildren: ${(n.children||[]).length}\nlatency: ${ms} ms\nsubtree latency: ${sub.totalLatency.toFixed(2)} ms\nsubtree nodes: ${sub.count}${sub.totalTokens?`\nsubtree tokens: ${sub.totalTokens}`:""}${n.kind?`\nkind: ${n.kind}`:""}`;
+  const summaryText=`status: ${nodeStatus(n)}\nnode: ${n.id}\nparent: ${n.pid || "(root)"}\ndepth: ${n.depth}\nchildren: ${(n.children||[]).length}\nlatency: ${timing(n).elapsed_ms.toFixed(3)} ms\nself wall time: ${timing(n).self_ms.toFixed(3)} ms\nthreshold: ${timing(n).threshold_ms} ms\nself includes untraced work and waits, not just CPU\nsubtree latency: ${sub.totalLatency.toFixed(2)} ms\nsubtree nodes: ${sub.count}${sub.totalTokens?`\nsubtree tokens: ${sub.totalTokens}`:""}${n.kind?`\nkind: ${n.kind}`:""}`;
   let h=`<div class="dt">${esc(n.name)}</div>`;
   h+=`<div class="ds"><div class="dl">Summary</div>${dvBlock(summaryText)}</div>`;
   h+=`<div class="ds"><div class="dl">Status</div><div class="dv">${st}</div></div>`;
@@ -958,7 +992,7 @@ function renderGantt(){
   sorted.forEach(n=>{
     const left=((n.start_ms||0)/totalSpan*100).toFixed(3);
     const width=(Math.max(n.latency_ms||0,totalSpan*0.003)/totalSpan*100).toFixed(3);
-    const col=n.error?'#da3633':(n.latency_ms||0)>1000?'#d29922':n.kind==='llm'?'#1f6feb':n.kind==='tool'?'#8250df':'#238636';
+    const col=nodeColor(n);
     const indent=Math.min((n.depth||0)*12,60);
     h+=`<div class="gantt-row" data-nid="${esc(n.id)}">
       <div class="gantt-lbl" style="padding-left:${indent}px" title="${esc(n.name)}">${esc(n.name)}</div>
